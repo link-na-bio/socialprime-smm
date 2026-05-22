@@ -203,7 +203,7 @@ const HomeLanding: React.FC = () => {
 
                         <p className="text-lg md:text-xl text-slate-400 leading-relaxed max-w-2xl mx-auto lg:mx-0 font-medium">
                             Acredite que cada marca é um planeta que precisa ser estrategicamente cuidado para crescer e se destacar no universo digital.
-                            <strong className="text-white block mt-2 tracking-wide">Rápido. Seguro. Automático.</strong>
+                            <strong className="text-white block mt-2 tracking-wide">Rápido. Seguro. Automático. Sem login em rede social.</strong>
                         </p>
 
                         <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start pt-4">
