@@ -128,13 +128,13 @@ const LayoutHandler: React.FC = () => {
               <Route path="/new-order" element={<NewOrder />} />
               <Route path="/add-funds" element={<AddFunds />} />
               <Route path="/history" element={<History />} />
-              <Route path="/api-config" element={<ApiConfig />} />
               <Route path="/account" element={<Account />} />
               <Route path="/notifications" element={<Notifications />} />
               <Route path="/admin/*" element={
                 <AdminRoute>
                   <Routes>
                     <Route path="/" element={<Admin />} />
+                    <Route path="/config" element={<ApiConfig />} />
                     <Route path="/support" element={<AdminSupport />} />
                   </Routes>
                 </AdminRoute>

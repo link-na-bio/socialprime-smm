@@ -139,20 +139,6 @@ const NewOrder: React.FC = () => {
         externalOrderId = apiResponse.order;
       }
 
-      const { error: dbError } = await supabase
-        .from('orders')
-        .insert({
-          user_id: user.id,
-          service: nomeParaSalvar,
-          link: link,
-          quantity: Number(quantity),
-          charge: total, // Salva o valor COM LUCRO
-          status: 'pending',
-          external_id: externalOrderId
-        });
-
-      if (dbError) throw dbError;
-
       alert(MODO_TESTE ? 'PEDIDO TESTE REALIZADO!' : 'Pedido realizado com sucesso!');
       setLink('');
       setQuantity(1000);

@@ -173,7 +173,7 @@ const Admin: React.FC = () => {
                 <button
                     onClick={() => {
                         const pwd = prompt('Digite a senha de administrador:');
-                        if (pwd === '123456') navigate('/api-config');
+                        if (pwd === '123456') navigate('/admin/config');
                         else alert('Senha incorreta');
                     }}
                     className="bg-[#1e293b] hover:bg-[#334155] border border-slate-700 text-white px-4 py-2.5 rounded-lg font-bold transition-all flex items-center gap-2 text-sm shadow-sm"
