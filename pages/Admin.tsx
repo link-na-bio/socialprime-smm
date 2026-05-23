@@ -304,7 +304,7 @@ const Admin: React.FC = () => {
             // 1. Busca configurações de admin_config
             const { data: config, error: configError } = await supabase
                 .from('admin_config')
-                .select('api_url, api_key, margin_percent, category_margins')
+                .select('api_url, api_key, margin_percent, keyword_rules')
                 .single();
 
             if (configError || !config || !config.api_key) {
@@ -317,7 +317,7 @@ const Admin: React.FC = () => {
                     api_url: config.api_url,
                     api_key: config.api_key,
                     margin: config.margin_percent,
-                    category_margins: config.category_margins
+                    keyword_rules: config.keyword_rules
                 }
             });
 

@@ -6,63 +6,30 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+interface KeywordRule {
+    keywords: string;
+    margin: number;
+}
+
 /**
  * Calculates the dynamic profit margin percentage for a SMM service.
  */
-function calculateDynamicMargin(name: string, cost: number): number {
+function calculateDynamicMargin(name: string, keywordRules: KeywordRule[], globalMargin: number): number {
     const nameLower = name.toLowerCase();
 
-    // Regra 5: Custo superior a R$ 100,00 -> Margem fixa de proteção de 60%
-    if (cost > 100.00) {
-        return 60;
+    // Encontra a primeira regra que bate com o nome do serviço
+    const matchingRule = keywordRules.find(rule => {
+        if (!rule.keywords) return false;
+        // Divide as palavras-chave por vírgula, limpa os espaços e filtra vazios
+        const keywordsList = rule.keywords.split(',').map(k => k.trim().toLowerCase()).filter(k => k.length > 0);
+        return keywordsList.some(keyword => nameLower.includes(keyword));
+    });
+
+    if (matchingRule) {
+        return matchingRule.margin;
     }
 
-    // Regra 1: Visualizações, Views ou Impressões -> 500%
-    if (
-        nameLower.includes('visualizações') || 
-        nameLower.includes('visualizacoes') || 
-        nameLower.includes('views') || 
-        nameLower.includes('impressões') || 
-        nameLower.includes('impressoes')
-    ) {
-        return 500;
-    }
-
-    // Regra 2: Curtidas, Likes, Compartilhamentos, Shares ou Reactions -> 300%
-    if (
-        nameLower.includes('curtidas') || 
-        nameLower.includes('likes') || 
-        nameLower.includes('compartilhamentos') || 
-        nameLower.includes('shares') || 
-        nameLower.includes('reactions')
-    ) {
-        return 300;
-    }
-
-    // Regra 3: Membros, Telegram ou Global (e NÃO for YouTube) -> 150%
-    const isYoutube = nameLower.includes('youtube') || nameLower.includes('yt');
-    if (
-        !isYoutube && 
-        (nameLower.includes('membros') || nameLower.includes('telegram') || nameLower.includes('global'))
-    ) {
-        return 150;
-    }
-
-    // Regra 4: Seguidores Brasileiros, Seguidores Brasil ou BR -> 140%
-    const hasBr = 
-        nameLower.includes('seguidores brasileiros') || 
-        nameLower.includes('seguidores brasil') || 
-        nameLower.includes('brasil') || 
-        nameLower.includes('brasileiro') || 
-        nameLower.includes('🇧🇷') || 
-        /\bbr\b/.test(nameLower);
-
-    if (hasBr) {
-        return 140;
-    }
-
-    // Fallback -> 100%
-    return 100;
+    return globalMargin;
 }
 
 serve(async (req) => {
@@ -78,7 +45,7 @@ serve(async (req) => {
         )
 
         // 2. Tenta ler do corpo da requisição (se vier do frontend)
-        let { api_url, api_key } = await req.json().catch(() => ({}))
+        let { api_url, api_key, margin, keyword_rules } = await req.json().catch(() => ({}))
 
         // 3. Se não veio na requisição (ex: Cron Job), busca no Banco
         if (!api_url || !api_key) {
@@ -95,10 +62,22 @@ serve(async (req) => {
 
             api_url = config.api_url
             api_key = config.api_key
+            margin = config.margin_percent
+            keyword_rules = config.keyword_rules
         }
 
         if (!api_url || !api_key) {
             throw new Error('Configuração incompleta (URL ou Key faltando).')
+        }
+
+        const globalMargin = Number(margin) || 200;
+        let rules: KeywordRule[] = [];
+        try {
+            rules = Array.isArray(keyword_rules)
+                ? keyword_rules
+                : JSON.parse(keyword_rules || '[]');
+        } catch (e) {
+            rules = [];
         }
 
         console.log(`Iniciando sincronização com: ${api_url} usando Lógica de Precificação Dinâmica por Palavras-Chave.`)
@@ -121,19 +100,19 @@ serve(async (req) => {
             throw new Error('A API do fornecedor não retornou uma lista válida.');
         }
 
-        // 5. Processa e Calcula Preços via Pricing Middleware
+        // 5. Processa e Prepara para salvar os dados originais no banco
         const servicesToUpsert = providerServices.map((s: any) => {
             const cost = parseFloat(s.rate);
             
-            // Aplica a margem de lucro dinâmica com base em palavras-chave e custo
-            const profitMargin = calculateDynamicMargin(s.name || '', cost);
+            // Calculamos apenas para fins de log ou auditoria se necessário
+            const profitMargin = calculateDynamicMargin(s.name || '', rules, globalMargin);
             const finalPrice = cost + (cost * (profitMargin / 100));
 
             return {
                 service_id: Number(s.service),
                 name: s.name,
                 category: s.category,
-                rate: Number(finalPrice.toFixed(2)),
+                rate: cost, // Salva o preço de custo original para que as regras sejam aplicadas dinamicamente sem double-compounding
                 min: Number(s.min),
                 max: Number(s.max),
                 type: s.type,

@@ -18,7 +18,7 @@ const ApiConfig: React.FC = () => {
     const [marginPercent, setMarginPercent] = useState<number>(200);
     const [apiUrl, setApiUrl] = useState<string>('https://agenciapopular.com/api/v2');
     const [apiKey, setApiKey] = useState<string>('');
-    const [categoryMargins, setCategoryMargins] = useState<{ category: string; margin: number }[]>([]);
+    const [keywordRules, setKeywordRules] = useState<{ keywords: string; margin: number }[]>([]);
 
     useEffect(() => {
         loadSettings();
@@ -52,14 +52,14 @@ const ApiConfig: React.FC = () => {
                 setApiUrl(config.api_url || 'https://agenciapopular.com/api/v2');
                 setApiKey(config.api_key || '');
                 
-                // Parse e carrega category_margins
+                // Parse e carrega keyword_rules
                 try {
-                    const parsedMargins = Array.isArray(config.category_margins)
-                        ? config.category_margins
-                        : JSON.parse(config.category_margins || '[]');
-                    setCategoryMargins(parsedMargins);
+                    const parsedRules = Array.isArray(config.keyword_rules)
+                        ? config.keyword_rules
+                        : JSON.parse(config.keyword_rules || '[]');
+                    setKeywordRules(parsedRules);
                 } catch (e) {
-                    setCategoryMargins([]);
+                    setKeywordRules([]);
                 }
             }
         } catch (error) {
@@ -101,7 +101,7 @@ const ApiConfig: React.FC = () => {
             const { data: existingConfig } = await supabase.from('admin_config').select('id').single();
 
             // Filtra itens vazios antes de salvar
-            const cleanedMargins = categoryMargins.filter(item => item.category.trim() !== '');
+            const cleanedRules = keywordRules.filter(item => item.keywords.trim() !== '');
 
             if (existingConfig) {
                 await supabase
@@ -110,7 +110,7 @@ const ApiConfig: React.FC = () => {
                         api_url: apiUrl,
                         api_key: apiKey,
                         margin_percent: Number(marginPercent),
-                        category_margins: cleanedMargins,
+                        keyword_rules: cleanedRules,
                         updated_at: new Date(),
                     })
                     .eq('id', existingConfig.id);
@@ -120,7 +120,7 @@ const ApiConfig: React.FC = () => {
                     api_url: apiUrl,
                     api_key: apiKey,
                     margin_percent: Number(marginPercent),
-                    category_margins: cleanedMargins,
+                    keyword_rules: cleanedRules,
                 });
             }
 
@@ -182,64 +182,64 @@ const ApiConfig: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* Margens Específicas por Categoria */}
+                    {/* Regras Dinâmicas por Palavras-chave */}
                     <div className="bg-[#0b111a] p-5 rounded-lg border border-slate-800 flex flex-col gap-4 md:col-span-2">
                         <div>
                             <label className="text-xs font-bold text-blue-400 uppercase tracking-wider block">
-                                Margens Específicas por Categoria de Serviço
+                                Regras Dinâmicas por Palavras-chave
                             </label>
                             <p className="text-[11px] text-slate-500 mt-1">
-                                Defina margens personalizadas para categorias específicas (ex: Visualizações, Curtidas). Se o serviço pertencer a uma categoria correspondente, esta margem substituirá a Margem Global.
+                                Defina margens de lucro personalizadas com base em palavras-chave presentes no nome do serviço. Se o nome do serviço contiver qualquer uma das palavras-chave (separadas por vírgula), a margem correspondente será aplicada. Se nenhuma regra coincidir, a Margem Global será utilizada como fallback.
                             </p>
                         </div>
 
-                        {categoryMargins.length === 0 ? (
+                        {keywordRules.length === 0 ? (
                             <div className="text-center py-6 border border-dashed border-slate-800 rounded-lg text-slate-600 text-sm">
-                                Nenhuma margem específica configurada. A margem global será aplicada a todos os serviços.
+                                Nenhuma regra dinâmica configurada. A margem global será aplicada a todos os serviços.
                             </div>
                         ) : (
                             <div className="space-y-4">
-                                {categoryMargins.map((item, index) => (
+                                {keywordRules.map((item, index) => (
                                     <div key={index} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center bg-[#111a22] p-4 rounded-lg border border-slate-800/60 relative group">
-                                        {/* Categoria */}
+                                        {/* Palavras-chave */}
                                         <div className="md:col-span-6 flex flex-col gap-1">
-                                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                                                Nome da Categoria (busca por termo)
+                                            <label className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">
+                                                Palavras-chave (separadas por vírgula)
                                             </label>
                                             <input
                                                 type="text"
-                                                value={item.category}
+                                                value={item.keywords}
                                                 onChange={(e) => {
-                                                    const updated = [...categoryMargins];
-                                                    updated[index].category = e.target.value;
-                                                    setCategoryMargins(updated);
+                                                    const updated = [...keywordRules];
+                                                    updated[index].keywords = e.target.value;
+                                                    setKeywordRules(updated);
                                                 }}
-                                                placeholder="Ex: Curtidas, Visualizações, Seguidores Brasileiros"
-                                                className="w-full bg-[#0b111a] border border-slate-700 rounded-lg p-2.5 text-white text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                                placeholder="Ex: curtidas, likes, seguidores brasileiros"
+                                                className="w-full bg-[#0b111a] border border-slate-700 rounded-lg p-2.5 text-white text-sm focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
                                             />
-                                            <span className="text-[9px] text-slate-500">Mapeia serviços cuja categoria contenha este termo (ex: "Instagram - Curtidas").</span>
+                                            <span className="text-[9px] text-slate-500">Separadas por vírgula. Ex: visualizações, views, impressões</span>
                                         </div>
 
                                         {/* Margem (%) */}
                                         <div className="md:col-span-4 flex flex-col gap-1">
-                                            <label className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">
-                                                Margem (%)
+                                            <label className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">
+                                                Margem de Lucro (%)
                                             </label>
                                             <div className="relative">
                                                 <input
                                                     type="number"
                                                     value={item.margin}
                                                     onChange={(e) => {
-                                                        const updated = [...categoryMargins];
+                                                        const updated = [...keywordRules];
                                                         updated[index].margin = Number(e.target.value);
-                                                        setCategoryMargins(updated);
+                                                        setKeywordRules(updated);
                                                     }}
                                                     placeholder="150"
-                                                    className="w-full bg-[#0b111a] border border-slate-700 rounded-lg p-2.5 pr-8 text-white text-sm font-bold focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                                                    className="w-full bg-[#0b111a] border border-slate-700 rounded-lg p-2.5 pr-8 text-white text-sm font-bold focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none"
                                                 />
-                                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-400 font-bold text-sm">%</span>
+                                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-400 font-bold text-sm">%</span>
                                             </div>
-                                            <span className="text-[9px] text-slate-500">Exemplo: 150% transforma R$ 1,00 em R$ 2,50.</span>
+                                            <span className="text-[9px] text-slate-500">Exemplo: 300% de lucro sobre o custo original.</span>
                                         </div>
 
                                         {/* Ação (Excluir) */}
@@ -247,7 +247,7 @@ const ApiConfig: React.FC = () => {
                                             <button
                                                 type="button"
                                                 onClick={() => {
-                                                    setCategoryMargins(categoryMargins.filter((_, i) => i !== index));
+                                                    setKeywordRules(keywordRules.filter((_, i) => i !== index));
                                                 }}
                                                 className="bg-red-500/10 hover:bg-red-500/25 border border-red-500/30 text-red-400 p-2.5 rounded-lg font-bold transition-all flex items-center gap-1.5 text-xs shadow-sm cursor-pointer w-full md:w-auto justify-center"
                                             >
@@ -264,12 +264,12 @@ const ApiConfig: React.FC = () => {
                             <button
                                 type="button"
                                 onClick={() => {
-                                    setCategoryMargins([...categoryMargins, { category: '', margin: 100 }]);
+                                    setKeywordRules([...keywordRules, { keywords: '', margin: 100 }]);
                                 }}
                                 className="bg-[#1e293b] hover:bg-[#334155] border border-slate-700 text-white px-4 py-2.5 rounded-lg font-bold transition-all flex items-center gap-2 text-xs shadow-sm cursor-pointer"
                             >
                                 <span className="material-symbols-outlined text-[16px]">add_circle</span>
-                                Adicionar Margem por Categoria
+                                Adicionar Nova Regra
                             </button>
                         </div>
                     </div>

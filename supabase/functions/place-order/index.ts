@@ -53,10 +53,10 @@ Deno.serve(async (req) => {
             throw new Error(`Serviço ID ${serviceId} não encontrado (ou colunas incorretas).`)
         }
 
-        // Buscar Configuração Global (Margem, API Key, URL, Margens por Categoria)
+        // Buscar Configuração Global (Margem, API Key, URL, Regras de Palavras-chave)
         const { data: config } = await supabaseClient
             .from('admin_config')
-            .select('api_key, api_url, margin_percent, category_margins')
+            .select('api_key, api_url, margin_percent, keyword_rules')
             .single()
 
         if (!config) throw new Error('Configuração global não encontrada.')
@@ -64,54 +64,31 @@ Deno.serve(async (req) => {
         // 4. Calcular Custo e Preço de Venda
         const costPrice = Number(localService.rate);
         
-        let marginToUse = 100; // fallback padrão de 100%
+        let marginToUse = Number(config.margin_percent) || 200; // fallback para a margem global padrão
         if (localService.custom_margin !== null && localService.custom_margin !== undefined) {
             marginToUse = Number(localService.custom_margin);
         } else {
             const nameLower = (localService.name || '').toLowerCase();
-            const cost = costPrice;
+            
+            // Parse keyword rules
+            let rules: any[] = [];
+            try {
+                rules = Array.isArray(config.keyword_rules)
+                    ? config.keyword_rules
+                    : JSON.parse(config.keyword_rules || '[]');
+            } catch (e) {
+                rules = [];
+            }
 
-            // Regra 5: Custo superior a R$ 100,00 -> Margem fixa de proteção de 60%
-            if (cost > 100.00) {
-                marginToUse = 60;
-            }
-            // Regra 1: Visualizações, Views ou Impressões -> 500%
-            else if (
-                nameLower.includes('visualizações') || 
-                nameLower.includes('visualizacoes') || 
-                nameLower.includes('views') || 
-                nameLower.includes('impressões') || 
-                nameLower.includes('impressoes')
-            ) {
-                marginToUse = 500;
-            }
-            // Regra 2: Curtidas, Likes, Compartilhamentos, Shares ou Reactions -> 300%
-            else if (
-                nameLower.includes('curtidas') || 
-                nameLower.includes('likes') || 
-                nameLower.includes('compartilhamentos') || 
-                nameLower.includes('shares') || 
-                nameLower.includes('reactions')
-            ) {
-                marginToUse = 300;
-            }
-            // Regra 3: Membros, Telegram ou Global (e NÃO for YouTube) -> 150%
-            else if (
-                !(nameLower.includes('youtube') || nameLower.includes('yt')) && 
-                (nameLower.includes('membros') || nameLower.includes('telegram') || nameLower.includes('global'))
-            ) {
-                marginToUse = 150;
-            }
-            // Regra 4: Seguidores Brasileiros, Seguidores Brasil ou BR -> 140%
-            else if (
-                nameLower.includes('seguidores brasileiros') || 
-                nameLower.includes('seguidores brasil') || 
-                nameLower.includes('brasil') || 
-                nameLower.includes('brasileiro') || 
-                nameLower.includes('🇧🇷') || 
-                /\bbr\b/.test(nameLower)
-            ) {
-                marginToUse = 140;
+            // Encontra a primeira regra que bate com o nome do serviço
+            const matchingRule = rules.find((rule: any) => {
+                if (!rule || !rule.keywords) return false;
+                const keywordsList = rule.keywords.split(',').map((k: string) => k.trim().toLowerCase()).filter((k: string) => k.length > 0);
+                return keywordsList.some((keyword: string) => nameLower.includes(keyword));
+            });
+
+            if (matchingRule) {
+                marginToUse = Number(matchingRule.margin);
             }
         }
         

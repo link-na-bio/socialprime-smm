@@ -27,7 +27,7 @@ const NewOrder: React.FC = () => {
 
   // Margem Padrão (Começa em 200% para garantir lucro mesmo se falhar a busca)
   const [globalMargin, setGlobalMargin] = useState<number>(200);
-  const [categoryMargins, setCategoryMargins] = useState<{ category: string; margin: number }[]>([]);
+  const [keywordRules, setKeywordRules] = useState<{ keywords: string; margin: number }[]>([]);
 
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedServiceId, setSelectedServiceId] = useState<string>('');
@@ -52,21 +52,21 @@ const NewOrder: React.FC = () => {
         if (profile) setUserBalance(profile.balance);
       }
 
-      // Busca Margem Global e por Categoria
+      // Busca Margem Global e por Palavras-chave
       const { data: config } = await supabase
         .from('admin_config')
-        .select('margin_percent, category_margins')
+        .select('margin_percent, keyword_rules')
         .single();
 
       if (config) {
         setGlobalMargin(config.margin_percent);
         try {
-          const parsed = Array.isArray(config.category_margins)
-            ? config.category_margins
-            : JSON.parse(config.category_margins || '[]');
-          setCategoryMargins(parsed);
+          const parsed = Array.isArray(config.keyword_rules)
+            ? config.keyword_rules
+            : JSON.parse(config.keyword_rules || '[]');
+          setKeywordRules(parsed);
         } catch (e) {
-          setCategoryMargins([]);
+          setKeywordRules([]);
         }
       }
     };
@@ -107,54 +107,22 @@ const NewOrder: React.FC = () => {
     if (!service) return 0;
  
     // Define qual margem usar (Personalizada, ou Calculada Dinamicamente por Palavra-Chave)
-    let marginToUse = 100; // fallback padrão de 100%
+    let marginToUse = globalMargin;
     if (service.custom_margin !== null && service.custom_margin !== undefined) {
       marginToUse = service.custom_margin;
     } else {
       const nameLower = (service.name || '').toLowerCase();
-      const cost = service.rate;
+      
+      // Encontra a primeira regra que bate com o nome do serviço
+      const matchingRule = keywordRules.find(rule => {
+        if (!rule.keywords) return false;
+        // Divide as palavras-chave por vírgula, limpa os espaços e filtra vazios
+        const keywordsList = rule.keywords.split(',').map(k => k.trim().toLowerCase()).filter(k => k.length > 0);
+        return keywordsList.some(keyword => nameLower.includes(keyword));
+      });
 
-      // Regra 5: Custo superior a R$ 100,00 -> Margem fixa de proteção de 60%
-      if (cost > 100.00) {
-        marginToUse = 60;
-      }
-      // Regra 1: Visualizações, Views ou Impressões -> 500%
-      else if (
-        nameLower.includes('visualizações') || 
-        nameLower.includes('visualizacoes') || 
-        nameLower.includes('views') || 
-        nameLower.includes('impressões') || 
-        nameLower.includes('impressoes')
-      ) {
-        marginToUse = 500;
-      }
-      // Regra 2: Curtidas, Likes, Compartilhamentos, Shares ou Reactions -> 300%
-      else if (
-        nameLower.includes('curtidas') || 
-        nameLower.includes('likes') || 
-        nameLower.includes('compartilhamentos') || 
-        nameLower.includes('shares') || 
-        nameLower.includes('reactions')
-      ) {
-        marginToUse = 300;
-      }
-      // Regra 3: Membros, Telegram ou Global (e NÃO for YouTube) -> 150%
-      else if (
-        !(nameLower.includes('youtube') || nameLower.includes('yt')) && 
-        (nameLower.includes('membros') || nameLower.includes('telegram') || nameLower.includes('global'))
-      ) {
-        marginToUse = 150;
-      }
-      // Regra 4: Seguidores Brasileiros, Seguidores Brasil ou BR -> 140%
-      else if (
-        nameLower.includes('seguidores brasileiros') || 
-        nameLower.includes('seguidores brasil') || 
-        nameLower.includes('brasil') || 
-        nameLower.includes('brasileiro') || 
-        nameLower.includes('🇧🇷') || 
-        /\bbr\b/.test(nameLower)
-      ) {
-        marginToUse = 140;
+      if (matchingRule) {
+        marginToUse = matchingRule.margin;
       }
     }
  
