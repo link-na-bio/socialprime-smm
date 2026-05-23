@@ -50,7 +50,7 @@ const AddFunds: React.FC = () => {
     const [cpf, setCpf] = useState<string>('');
     const [phone, setPhone] = useState<string>('');
     const [loading, setLoading] = useState(false);
-    
+
     // Estados do Fluxo Pix Manual
     const [showPixModal, setShowPixModal] = useState(false);
     const [showSuccessState, setShowSuccessState] = useState(false);
@@ -135,13 +135,13 @@ const AddFunds: React.FC = () => {
                 isPredefined: true
             };
         }
-        
+
         // Geração dinâmica para valores personalizados
         const numericAmount = parseFloat(amount.replace(',', '.'));
         const valorPixStr = isNaN(numericAmount) ? "1.00" : numericAmount.toFixed(2);
-        
+
         const brCode = `00020101021226870014br.gov.bcb.pix25650017${CHAVE_PIX_REAL}5204000053039865405${valorPixStr}5802BR5924BRUNO ADRIANO COSTA REIS6008BRASILIA62070503***6304`;
-        
+
         return {
             qrCodeImg: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(brCode)}`,
             copiaECola: brCode,
@@ -233,7 +233,7 @@ const AddFunds: React.FC = () => {
             const discordWebhookUrl = 'https://discord.com/api/webhooks/1492131248091435170/l4cqtcHnLulXpEDka8bsSon81D2_8OY5e5vP3kxlbI6UcIb5KOSIHmhwivBqPsDmuHdU';
             const valorFormatado = numericAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
             const mensagemDiscord = `@everyone 💸 **NOVO COMPROVANTE RECEBIDO (PIX MANUAL)** 💸\n\n🆔 **ID Transação:** #${transactionId}\n👤 **Cliente:** ${user.email}\n💰 **Valor do PIX:** R$ ${valorFormatado}\n\n🚀 Acesse o Painel Admin para conferir e aprovar o saldo imediatamente!`;
-            
+
             try {
                 await fetch(discordWebhookUrl, {
                     method: 'POST',
@@ -278,7 +278,7 @@ const AddFunds: React.FC = () => {
                         Recebemos o seu comprovante e criamos a transação <strong className="text-white font-mono">#{txId}</strong>.
                         <br />
                         <span className="text-yellow-500 font-bold block mt-3">
-                            Status atual: "Em Análise". 
+                            Status atual: "Em Análise".
                         </span>
                         Seu saldo de <strong className="text-white">R$ {parseFloat(amount).toFixed(2).replace('.', ',')}</strong> será creditado em instantes assim que a equipe financeira conferir a transação.
                     </p>
@@ -335,7 +335,7 @@ const AddFunds: React.FC = () => {
                                             <p className="text-[10px] text-primary uppercase tracking-widest font-bold mb-2">Instruções de Pagamento:</p>
                                             <p className="text-gray-300 leading-relaxed font-light mb-4">
                                                 1. Escaneie o QR Code acima ou use a chave Pix abaixo.<br />
-                                                2. No app do banco, digite o valor exato de <strong className="text-white font-bold">R$ {parseFloat(amount).toFixed(2).replace('.', ',')}</strong>.<br />
+                                                2. No app do banco, aparecerá o valor exato de <strong className="text-white font-bold">R$ {parseFloat(amount).toFixed(2).replace('.', ',')}</strong>.<br />
                                                 3. Anexe o comprovante abaixo e finalize a recarga.
                                             </p>
 
@@ -369,11 +369,10 @@ const AddFunds: React.FC = () => {
                                         />
                                         <div
                                             onClick={() => fileInputRef.current?.click()}
-                                            className={`border-2 border-dashed rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer transition-all ${
-                                                comprovante
+                                            className={`border-2 border-dashed rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer transition-all ${comprovante
                                                     ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400'
                                                     : 'border-border-dark hover:border-primary/50 bg-background-dark/50 hover:bg-background-dark'
-                                            }`}
+                                                }`}
                                         >
                                             {comprovante ? (
                                                 <div className="flex items-center gap-2">
