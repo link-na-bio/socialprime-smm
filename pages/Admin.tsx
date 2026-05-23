@@ -44,8 +44,38 @@ const Admin: React.FC = () => {
     const [amountToAdd, setAmountToAdd] = useState('');
     const [processing, setProcessing] = useState(false);
 
+    // Estados do Pix Manual
+    const [pendingTransactions, setPendingTransactions] = useState<any[]>([]);
+    const [isApproving, setIsApproving] = useState(false);
+    const [comprovanteModal, setComprovanteModal] = useState<{
+        isOpen: boolean;
+        url: string;
+        txId: string;
+        userId: string;
+        amount: number;
+        full_name: string;
+        email: string;
+    }>({ isOpen: false, url: '', txId: '', userId: '', amount: 0, full_name: '', email: '' });
+
     useEffect(() => {
         loadDashboard();
+
+        // 🌟 REALTIME DE TRANSAÇÕES PIX PENDENTES
+        const channel = supabase
+            .channel('admin_transactions_realtime')
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'transactions' },
+                () => {
+                    console.log('Fila de Pix atualizada em tempo real!');
+                    loadDashboard();
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
     }, []);
 
     const loadDashboard = async () => {
@@ -100,6 +130,43 @@ const Admin: React.FC = () => {
 
             setUsers(formattedUsers);
 
+            // 5. Busca transações Pix pendentes ('Pagamento em Análise')
+            const { data: txData, error: txError } = await supabase
+                .from('transactions')
+                .select('*')
+                .eq('status', 'Pagamento em Análise')
+                .order('created_at', { ascending: false });
+
+            if (!txError && txData) {
+                const userIds = Array.from(new Set(txData.map((tx: any) => tx.user_id)));
+                if (userIds.length > 0) {
+                    const { data: profilesData } = await supabase
+                        .from('profiles')
+                        .select('id, full_name')
+                        .in('id', userIds);
+
+                    const { data: notificationsData } = await supabase
+                        .from('notificacoes_admin')
+                        .select('order_id, user_email')
+                        .in('order_id', txData.map((tx: any) => tx.payment_id));
+
+                    const mapped = txData.map((tx: any) => {
+                        const profile = profilesData?.find((p: any) => p.id === tx.user_id);
+                        const notif = notificationsData?.find((n: any) => n.order_id === tx.payment_id);
+                        return {
+                            ...tx,
+                            full_name: profile?.full_name || 'Usuário Sem Nome',
+                            email: notif?.user_email || 'email@desconhecido.com'
+                        };
+                    });
+                    setPendingTransactions(mapped);
+                } else {
+                    setPendingTransactions([]);
+                }
+            } else {
+                setPendingTransactions([]);
+            }
+
         } catch (error: any) {
             console.error('Erro Geral Admin:', error.message);
         } finally {
@@ -132,6 +199,97 @@ const Admin: React.FC = () => {
             alert('Erro: ' + err.message);
         } finally {
             setProcessing(false);
+        }
+    };
+
+    // Abre o visualizador do comprovante de Pix Manual
+    const handleViewComprovante = async (tx: any) => {
+        try {
+            const { data, error } = await supabase
+                .from('mensagens')
+                .select('conteudo')
+                .eq('order_id', tx.payment_id)
+                .eq('tipo', 'comprovante')
+                .order('criado_em', { ascending: false })
+                .limit(1)
+                .single();
+
+            if (error || !data) {
+                alert("Não foi possível encontrar o comprovante deste pagamento.");
+                return;
+            }
+
+            setComprovanteModal({
+                isOpen: true,
+                url: data.conteudo,
+                txId: tx.payment_id,
+                userId: tx.user_id,
+                amount: tx.amount,
+                full_name: tx.full_name,
+                email: tx.email
+            });
+        } catch (err: any) {
+            alert('Erro ao buscar comprovante: ' + err.message);
+        }
+    };
+
+    // Executa a aprovação do Pix manual (Credita saldo + Cria notificação)
+    const handleApprovePix = async () => {
+        if (!comprovanteModal.txId || !comprovanteModal.userId) return;
+        setIsApproving(true);
+
+        try {
+            // 1. Atualizar a transação para 'approved' no banco
+            const { error: txError } = await supabase
+                .from('transactions')
+                .update({ status: 'approved' })
+                .eq('payment_id', comprovanteModal.txId);
+
+            if (txError) throw txError;
+
+            // 2. Buscar saldo atual do perfil do cliente
+            const { data: profile, error: profileError } = await supabase
+                .from('profiles')
+                .select('balance, total_spent')
+                .eq('id', comprovanteModal.userId)
+                .single();
+
+            if (profileError || !profile) throw new Error("Perfil do usuário não encontrado.");
+
+            // 3. Somar o Pix ao saldo do usuário
+            const novoSaldo = Number(profile.balance || 0) + Number(comprovanteModal.amount);
+
+            const { error: updateError } = await supabase
+                .from('profiles')
+                .update({ balance: novoSaldo })
+                .eq('id', comprovanteModal.userId);
+
+            if (updateError) throw updateError;
+
+            // 4. Registrar notificação de sucesso para o cliente
+            await supabase.from('notifications').insert({
+                user_id: comprovanteModal.userId,
+                title: 'Depósito Pix Aprovado! 🎉',
+                message: `Seu Pix de R$ ${comprovanteModal.amount.toFixed(2).replace('.', ',')} foi aprovado pela equipe financeira e o saldo já está disponível na sua conta!`,
+                type: 'info',
+                is_read: false
+            });
+
+            // 5. Atualizar notificação de admin para 'lida'
+            await supabase
+                .from('notificacoes_admin')
+                .update({ lida: true })
+                .eq('order_id', comprovanteModal.txId);
+
+            alert('PIX Aprovado com sucesso! Saldo creditado e notificação enviada ao cliente.');
+            setComprovanteModal({ isOpen: false, url: '', txId: '', userId: '', amount: 0, full_name: '', email: '' });
+            loadDashboard();
+
+        } catch (err: any) {
+            console.error(err);
+            alert('Erro ao aprovar Pix: ' + err.message);
+        } finally {
+            setIsApproving(false);
         }
     };
 
@@ -320,6 +478,65 @@ const Admin: React.FC = () => {
                 </div>
             </div>
 
+            {/* --- TRANSAÇÕES PIX PENDENTES (Realtime) --- */}
+            {pendingTransactions.length > 0 && (
+                <div className="bg-[#111827] rounded-xl border border-emerald-900/30 shadow-lg overflow-hidden shadow-emerald-950/5 animate-in fade-in slide-in-from-top-4 duration-300 mb-8">
+                    <div className="p-6 border-b border-slate-800 bg-emerald-950/10 flex justify-between items-center">
+                        <h3 className="text-lg font-bold text-emerald-400 flex items-center gap-2">
+                            <span className="material-symbols-outlined text-emerald-400 animate-pulse">payments</span>
+                            Pix Pendentes para Análise ({pendingTransactions.length})
+                        </h3>
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 uppercase tracking-widest animate-pulse">
+                            Tempo Real Ativo
+                        </span>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm">
+                            <thead className="bg-[#0b111a] text-slate-400">
+                                <tr>
+                                    <th className="px-6 py-4 font-bold uppercase text-xs tracking-wider">ID Transação</th>
+                                    <th className="px-6 py-4 font-bold uppercase text-xs tracking-wider">Cliente</th>
+                                    <th className="px-6 py-4 font-bold uppercase text-xs tracking-wider">Valor Solicitado</th>
+                                    <th className="px-6 py-4 font-bold uppercase text-xs tracking-wider text-center">Status</th>
+                                    <th className="px-6 py-4 font-bold uppercase text-xs tracking-wider text-right">Ação</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-800">
+                                {pendingTransactions.map((tx) => (
+                                    <tr key={tx.id} className="hover:bg-slate-800/20 bg-emerald-950/5 transition-colors">
+                                        <td className="px-6 py-4 font-mono font-bold text-amber-500">
+                                            #{tx.payment_id}
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <div className="font-bold text-white">{tx.full_name}</div>
+                                            <div className="text-xs text-slate-500 mt-0.5">{tx.email}</div>
+                                        </td>
+                                        <td className="px-6 py-4 font-mono font-bold text-white">
+                                            R$ {tx.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </td>
+                                        <td className="px-6 py-4 text-center">
+                                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-yellow-500/10 text-yellow-500 border border-yellow-500/20 animate-pulse">
+                                                Em Análise
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4 text-right">
+                                            <button
+                                                onClick={() => handleViewComprovante(tx)}
+                                                className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs rounded-lg transition-all flex items-center gap-1.5 inline-flex shadow-lg shadow-emerald-500/10 active:scale-95"
+                                            >
+                                                <span className="material-symbols-outlined text-[16px]">file_open</span>
+                                                Ver Comprovante
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
             {/* --- TABELA DE USUÁRIOS --- */}
             <div className="bg-[#111827] rounded-xl border border-slate-800 shadow-lg overflow-hidden">
                 <div className="p-6 border-b border-slate-800 flex flex-col md:flex-row justify-between items-center gap-4">
@@ -434,6 +651,64 @@ const Admin: React.FC = () => {
                             <button onClick={() => setIsModalOpen(false)} className="flex-1 py-3 text-slate-400 hover:text-white font-medium hover:bg-slate-800 rounded-lg transition-colors">Cancelar</button>
                             <button onClick={handleAddBalance} disabled={processing} className="flex-1 py-3 bg-primary hover:bg-blue-600 text-white rounded-lg font-bold shadow-lg shadow-blue-500/20 transition-all">
                                 {processing ? 'Processando...' : 'Confirmar Crédito'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal de Conferência e Visualização do Comprovante */}
+            {comprovanteModal.isOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-[#1e293b] border border-slate-700 w-full max-w-xl overflow-hidden shadow-2xl rounded-2xl">
+                        <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
+                            <h3 className="font-bold uppercase tracking-widest text-emerald-400 flex items-center gap-2 text-sm">
+                                <span className="material-symbols-outlined text-emerald-400 animate-pulse">payments</span>
+                                Conferência de PIX Manual
+                            </h3>
+                            <button 
+                                onClick={() => setComprovanteModal({ isOpen: false, url: '', txId: '', userId: '', amount: 0, full_name: '', email: '' })} 
+                                className="text-slate-400 hover:text-white"
+                            >
+                                <span className="material-symbols-outlined">close</span>
+                            </button>
+                        </div>
+
+                        <div className="p-6 flex flex-col items-center bg-slate-950/40 text-center">
+                            <p className="text-xs text-slate-400 uppercase tracking-widest mb-4">Comprovante anexado pelo cliente:</p>
+                            <div className="relative w-full max-w-sm h-[380px] border border-slate-800 rounded-xl overflow-hidden bg-black flex items-center justify-center shadow-inner">
+                                {comprovanteModal.url.includes('.pdf') ? (
+                                    <iframe src={comprovanteModal.url} className="w-full h-full" title="PDF do Comprovante" />
+                                ) : (
+                                    <img src={comprovanteModal.url} alt="Comprovante Pix" className="w-full h-full object-contain" />
+                                )}
+                            </div>
+                            <div className="mt-4 text-xs text-slate-400 space-y-1">
+                                <p>Cliente: <strong className="text-white">{comprovanteModal.full_name} ({comprovanteModal.email})</strong></p>
+                                <p>Valor: <strong className="text-emerald-400 font-mono font-bold text-sm">R$ {comprovanteModal.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></p>
+                            </div>
+                        </div>
+
+                        <div className="px-6 py-4 border-t border-slate-800 bg-slate-900/50 flex items-center justify-between gap-4">
+                            <button
+                                onClick={() => setComprovanteModal({ isOpen: false, url: '', txId: '', userId: '', amount: 0, full_name: '', email: '' })}
+                                className="flex-1 py-3 bg-[#334155] text-slate-300 text-xs font-bold uppercase tracking-widest hover:text-white hover:bg-slate-700 rounded-xl transition-all"
+                            >
+                                Voltar
+                            </button>
+                            <button
+                                onClick={handleApprovePix}
+                                disabled={isApproving}
+                                className="flex-1 py-3 bg-emerald-500 text-black text-xs font-bold uppercase tracking-widest hover:bg-emerald-400 rounded-xl transition-all flex justify-center items-center gap-2 shadow-[0_0_20px_rgba(16,185,129,0.2)] disabled:opacity-50"
+                            >
+                                {isApproving ? (
+                                    <span className="material-symbols-outlined animate-spin text-[16px]">refresh</span>
+                                ) : (
+                                    <>
+                                        <span className="material-symbols-outlined text-[16px]">check_circle</span>
+                                        Aprovar PIX e Liberar Saldo
+                                    </>
+                                )}
                             </button>
                         </div>
                     </div>
