@@ -104,8 +104,9 @@ WITH CHECK (auth.uid() = to_user_id);
 
 -- 5. Storage (Bucket de Comprovantes)
 INSERT INTO storage.buckets (id, name, public) 
-VALUES ('comprovantes_pix', 'comprovantes_pix', false)
-ON CONFLICT (id) DO NOTHING;
+VALUES ('comprovantes_pix', 'comprovantes_pix', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
 
 -- Políticas de Storage para o Bucket 'comprovantes_pix'
 CREATE POLICY "Users can upload their own receipts" 
