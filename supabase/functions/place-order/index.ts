@@ -33,7 +33,7 @@ Deno.serve(async (req) => {
         // 3. Buscar Preço e Margem
         const { data: serviceData, error: serviceError } = await supabaseClient
             .from('services')
-            .select('rate, min, max, name, custom_margin')
+            .select('rate, min, max, name, custom_margin, category')
             .eq('service_id', serviceId)
             .maybeSingle()
 
@@ -42,7 +42,7 @@ Deno.serve(async (req) => {
         if (!localService) {
             const { data: serviceDataBackup } = await supabaseClient
                 .from('services')
-                .select('rate, min, max, name, custom_margin')
+                .select('rate, min, max, name, custom_margin, category')
                 .eq('id', serviceId)
                 .maybeSingle()
             localService = serviceDataBackup
@@ -53,19 +53,36 @@ Deno.serve(async (req) => {
             throw new Error(`Serviço ID ${serviceId} não encontrado (ou colunas incorretas).`)
         }
 
-        // Buscar Configuração Global (Margem, API Key, URL)
+        // Buscar Configuração Global (Margem, API Key, URL, Margens por Categoria)
         const { data: config } = await supabaseClient
             .from('admin_config')
-            .select('api_key, api_url, margin_percent')
+            .select('api_key, api_url, margin_percent, category_margins')
             .single()
 
         if (!config) throw new Error('Configuração global não encontrada.')
 
         // 4. Calcular Custo e Preço de Venda
         const costPrice = Number(localService.rate);
-        const marginToUse = (localService.custom_margin !== null && localService.custom_margin !== undefined) 
-            ? Number(localService.custom_margin) 
-            : Number(config.margin_percent || 200);
+        
+        let marginToUse = Number(config.margin_percent || 200);
+        if (localService.custom_margin !== null && localService.custom_margin !== undefined) {
+            marginToUse = Number(localService.custom_margin);
+        } else if (localService.category && config.category_margins) {
+            let parsedCategoryMargins = [];
+            try {
+                parsedCategoryMargins = Array.isArray(config.category_margins)
+                    ? config.category_margins
+                    : JSON.parse(config.category_margins || '[]');
+            } catch (e) {
+                parsedCategoryMargins = [];
+            }
+            const matchingMargin = parsedCategoryMargins.find((item: any) => 
+                item && item.category && localService.category.toLowerCase().includes(item.category.toLowerCase().trim())
+            );
+            if (matchingMargin) {
+                marginToUse = Number(matchingMargin.margin);
+            }
+        }
         
         const retailPricePer1k = costPrice * (1 + marginToUse / 100);
         

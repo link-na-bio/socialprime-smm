@@ -18,6 +18,7 @@ const ApiConfig: React.FC = () => {
     const [marginPercent, setMarginPercent] = useState<number>(200);
     const [apiUrl, setApiUrl] = useState<string>('https://agenciapopular.com/api/v2');
     const [apiKey, setApiKey] = useState<string>('');
+    const [categoryMargins, setCategoryMargins] = useState<{ category: string; margin: number }[]>([]);
 
     useEffect(() => {
         loadSettings();
@@ -50,6 +51,16 @@ const ApiConfig: React.FC = () => {
                 setMarginPercent(Number(config.margin_percent) || 200);
                 setApiUrl(config.api_url || 'https://agenciapopular.com/api/v2');
                 setApiKey(config.api_key || '');
+                
+                // Parse e carrega category_margins
+                try {
+                    const parsedMargins = Array.isArray(config.category_margins)
+                        ? config.category_margins
+                        : JSON.parse(config.category_margins || '[]');
+                    setCategoryMargins(parsedMargins);
+                } catch (e) {
+                    setCategoryMargins([]);
+                }
             }
         } catch (error) {
             console.log('Configurações carregadas com sucesso.');
@@ -89,6 +100,9 @@ const ApiConfig: React.FC = () => {
             // 2. Atualiza ou Cria admin_config (Provedor SMM)
             const { data: existingConfig } = await supabase.from('admin_config').select('id').single();
 
+            // Filtra itens vazios antes de salvar
+            const cleanedMargins = categoryMargins.filter(item => item.category.trim() !== '');
+
             if (existingConfig) {
                 await supabase
                     .from('admin_config')
@@ -96,6 +110,7 @@ const ApiConfig: React.FC = () => {
                         api_url: apiUrl,
                         api_key: apiKey,
                         margin_percent: Number(marginPercent),
+                        category_margins: cleanedMargins,
                         updated_at: new Date(),
                     })
                     .eq('id', existingConfig.id);
@@ -105,6 +120,7 @@ const ApiConfig: React.FC = () => {
                     api_url: apiUrl,
                     api_key: apiKey,
                     margin_percent: Number(marginPercent),
+                    category_margins: cleanedMargins,
                 });
             }
 
@@ -163,6 +179,98 @@ const ApiConfig: React.FC = () => {
                                 placeholder="200"
                             />
                             <span className="absolute right-4 top-1/2 -translate-y-1/2 text-emerald-400 font-bold text-xl">%</span>
+                        </div>
+                    </div>
+
+                    {/* Margens Específicas por Categoria */}
+                    <div className="bg-[#0b111a] p-5 rounded-lg border border-slate-800 flex flex-col gap-4 md:col-span-2">
+                        <div>
+                            <label className="text-xs font-bold text-blue-400 uppercase tracking-wider block">
+                                Margens Específicas por Categoria de Serviço
+                            </label>
+                            <p className="text-[11px] text-slate-500 mt-1">
+                                Defina margens personalizadas para categorias específicas (ex: Visualizações, Curtidas). Se o serviço pertencer a uma categoria correspondente, esta margem substituirá a Margem Global.
+                            </p>
+                        </div>
+
+                        {categoryMargins.length === 0 ? (
+                            <div className="text-center py-6 border border-dashed border-slate-800 rounded-lg text-slate-600 text-sm">
+                                Nenhuma margem específica configurada. A margem global será aplicada a todos os serviços.
+                            </div>
+                        ) : (
+                            <div className="space-y-4">
+                                {categoryMargins.map((item, index) => (
+                                    <div key={index} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center bg-[#111a22] p-4 rounded-lg border border-slate-800/60 relative group">
+                                        {/* Categoria */}
+                                        <div className="md:col-span-6 flex flex-col gap-1">
+                                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                                Nome da Categoria (busca por termo)
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={item.category}
+                                                onChange={(e) => {
+                                                    const updated = [...categoryMargins];
+                                                    updated[index].category = e.target.value;
+                                                    setCategoryMargins(updated);
+                                                }}
+                                                placeholder="Ex: Curtidas, Visualizações, Seguidores Brasileiros"
+                                                className="w-full bg-[#0b111a] border border-slate-700 rounded-lg p-2.5 text-white text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                            />
+                                            <span className="text-[9px] text-slate-500">Mapeia serviços cuja categoria contenha este termo (ex: "Instagram - Curtidas").</span>
+                                        </div>
+
+                                        {/* Margem (%) */}
+                                        <div className="md:col-span-4 flex flex-col gap-1">
+                                            <label className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">
+                                                Margem (%)
+                                            </label>
+                                            <div className="relative">
+                                                <input
+                                                    type="number"
+                                                    value={item.margin}
+                                                    onChange={(e) => {
+                                                        const updated = [...categoryMargins];
+                                                        updated[index].margin = Number(e.target.value);
+                                                        setCategoryMargins(updated);
+                                                    }}
+                                                    placeholder="150"
+                                                    className="w-full bg-[#0b111a] border border-slate-700 rounded-lg p-2.5 pr-8 text-white text-sm font-bold focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                                                />
+                                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-400 font-bold text-sm">%</span>
+                                            </div>
+                                            <span className="text-[9px] text-slate-500">Exemplo: 150% transforma R$ 1,00 em R$ 2,50.</span>
+                                        </div>
+
+                                        {/* Ação (Excluir) */}
+                                        <div className="md:col-span-2 flex justify-end md:justify-center pt-2 md:pt-4">
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setCategoryMargins(categoryMargins.filter((_, i) => i !== index));
+                                                }}
+                                                className="bg-red-500/10 hover:bg-red-500/25 border border-red-500/30 text-red-400 p-2.5 rounded-lg font-bold transition-all flex items-center gap-1.5 text-xs shadow-sm cursor-pointer w-full md:w-auto justify-center"
+                                            >
+                                                <span className="material-symbols-outlined text-[16px]">delete</span>
+                                                Excluir
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        <div className="flex justify-start">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setCategoryMargins([...categoryMargins, { category: '', margin: 100 }]);
+                                }}
+                                className="bg-[#1e293b] hover:bg-[#334155] border border-slate-700 text-white px-4 py-2.5 rounded-lg font-bold transition-all flex items-center gap-2 text-xs shadow-sm cursor-pointer"
+                            >
+                                <span className="material-symbols-outlined text-[16px]">add_circle</span>
+                                Adicionar Margem por Categoria
+                            </button>
                         </div>
                     </div>
 

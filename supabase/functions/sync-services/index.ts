@@ -20,14 +20,14 @@ serve(async (req) => {
         )
 
         // 2. Tenta ler do corpo da requisição (se vier do frontend)
-        let { api_url, api_key, margin } = await req.json().catch(() => ({}))
+        let { api_url, api_key, margin, category_margins } = await req.json().catch(() => ({}))
 
         // 3. Se não veio na requisição (ex: Cron Job), busca no Banco
         if (!api_url || !api_key) {
             console.log("Configuração não enviada. Buscando no banco de dados...")
 
             const { data: config, error: configError } = await supabase
-                .from('system_config')
+                .from('admin_config')
                 .select('*')
                 .single()
 
@@ -37,14 +37,25 @@ serve(async (req) => {
 
             api_url = config.api_url
             api_key = config.api_key
-            margin = config.global_profit_margin
+            margin = config.margin_percent !== undefined ? config.margin_percent : config.global_profit_margin
+            category_margins = config.category_margins
         }
 
         if (!api_url || !api_key) {
             throw new Error('Configuração incompleta (URL ou Key faltando).')
         }
 
-        console.log(`Iniciando sincronização com: ${api_url} (Margem: ${margin}%)`)
+        console.log(`Iniciando sincronização com: ${api_url} (Margem Global: ${margin}%)`)
+
+        // Parse seguro das margens por categoria
+        let parsedCategoryMargins: any[] = [];
+        try {
+            parsedCategoryMargins = Array.isArray(category_margins)
+                ? category_margins
+                : JSON.parse(category_margins || '[]');
+        } catch (e) {
+            parsedCategoryMargins = [];
+        }
 
         // 4. Busca Serviços no Fornecedor
         const params = new URLSearchParams();
@@ -67,7 +78,19 @@ serve(async (req) => {
         // 5. Processa e Calcula Preços
         const servicesToUpsert = providerServices.map((s: any) => {
             const cost = parseFloat(s.rate);
-            const profitMargin = Number(margin) || 0;
+            
+            // Define qual margem aplicar (Especifica por Categoria ou Global/Fallback)
+            let profitMargin = Number(margin) || 0;
+            if (s.category && Array.isArray(parsedCategoryMargins)) {
+                // Correspondência textual flexível (case-insensitive substring)
+                const matchingMargin = parsedCategoryMargins.find((item: any) => 
+                    item && item.category && s.category.toLowerCase().includes(item.category.toLowerCase().trim())
+                );
+                if (matchingMargin) {
+                    profitMargin = Number(matchingMargin.margin);
+                }
+            }
+
             const finalPrice = cost + (cost * (profitMargin / 100));
 
             return {

@@ -27,6 +27,7 @@ const NewOrder: React.FC = () => {
 
   // Margem Padrão (Começa em 200% para garantir lucro mesmo se falhar a busca)
   const [globalMargin, setGlobalMargin] = useState<number>(200);
+  const [categoryMargins, setCategoryMargins] = useState<{ category: string; margin: number }[]>([]);
 
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedServiceId, setSelectedServiceId] = useState<string>('');
@@ -51,14 +52,22 @@ const NewOrder: React.FC = () => {
         if (profile) setUserBalance(profile.balance);
       }
 
-      // Busca Margem Global
+      // Busca Margem Global e por Categoria
       const { data: config } = await supabase
         .from('admin_config')
-        .select('margin_percent')
+        .select('margin_percent, category_margins')
         .single();
 
       if (config) {
         setGlobalMargin(config.margin_percent);
+        try {
+          const parsed = Array.isArray(config.category_margins)
+            ? config.category_margins
+            : JSON.parse(config.category_margins || '[]');
+          setCategoryMargins(parsed);
+        } catch (e) {
+          setCategoryMargins([]);
+        }
       }
     };
     fetchInitialData();
@@ -96,12 +105,21 @@ const NewOrder: React.FC = () => {
   // ==========================================================================
   const getFinalPricePer1k = (service: Service | undefined) => {
     if (!service) return 0;
-
-    // Define qual margem usar (Personalizada ou Global)
-    const marginToUse = (service.custom_margin !== null && service.custom_margin !== undefined)
-      ? service.custom_margin
-      : globalMargin;
-
+ 
+    // Define qual margem usar (Personalizada, Categoria ou Global)
+    let marginToUse = globalMargin;
+    if (service.custom_margin !== null && service.custom_margin !== undefined) {
+      marginToUse = service.custom_margin;
+    } else if (service.category && categoryMargins.length > 0) {
+      // Correspondência textual flexível (case-insensitive substring)
+      const matchingMargin = categoryMargins.find((item) =>
+        item && item.category && service.category.toLowerCase().includes(item.category.toLowerCase().trim())
+      );
+      if (matchingMargin) {
+        marginToUse = matchingMargin.margin;
+      }
+    }
+ 
     // Custo * (1 + Margem/100). Ex: 0.50 * (1 + 2) = 1.50
     return service.rate * (1 + marginToUse / 100);
   };
