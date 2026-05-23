@@ -2,7 +2,48 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 
-const CHAVE_PIX_REAL = '23333811-9c37-469e-8979-d1eaa57e781c';
+// Chave Geral do Bruno
+const CHAVE_PIX_REAL = '02636623140';
+
+// Códigos Copia e Cola estáticos e QR Codes do Bruno
+const PACOTES_INFO: Record<string, any> = {
+    '20': {
+        nome: 'Recarga R$ 20',
+        preco: 20.00,
+        qrCodeImg: '/pix-20.png',
+        copiaECola: '00020126330014br.gov.bcb.pix011102636623140520400005303986540520.005802BR5924BRUNO ADRIANO COSTA REIS6008BRASILIA62170513SOCIALPRIME206304F279'
+    },
+    '50': {
+        nome: 'Recarga R$ 50',
+        preco: 50.00,
+        qrCodeImg: '/pix-50.png',
+        copiaECola: '00020126330014br.gov.bcb.pix011102636623140520400005303986540550.005802BR5924BRUNO ADRIANO COSTA REIS6008BRASILIA62170513SOCIALPRIME506304BC0E'
+    },
+    '100': {
+        nome: 'Recarga R$ 100',
+        preco: 100.00,
+        qrCodeImg: '/pix-100.png',
+        copiaECola: '00020126330014br.gov.bcb.pix0111026366231405204000053039865406100.005802BR5924BRUNO ADRIANO COSTA REIS6008BRASILIA62180514SOCIALPRIME1006304CFC2'
+    },
+    '200': {
+        nome: 'Recarga R$ 200',
+        preco: 200.00,
+        qrCodeImg: '/pix-200.png',
+        copiaECola: '00020126330014br.gov.bcb.pix0111026366231405204000053039865406200.005802BR5924BRUNO ADRIANO COSTA REIS6008BRASILIA62180514SOCIALPRIME2006304A2C9'
+    },
+    '500': {
+        nome: 'Recarga R$ 500',
+        preco: 500.00,
+        qrCodeImg: '/pix-500.png',
+        copiaECola: '00020126330014br.gov.bcb.pix0111026366231405204000053039865406500.005802BR5924BRUNO ADRIANO COSTA REIS6008BRASILIA62180514SOCIALPRIME50063045C26'
+    },
+    '500+': {
+        nome: 'Recarga VIP R$ 500+',
+        preco: 500.00,
+        qrCodeImg: '/pix-500+.png',
+        copiaECola: '00020126330014br.gov.bcb.pix0111026366231405204000053039865802BR5924BRUNO ADRIANO COSTA REIS6008BRASILIA62180514SOCIALPRIMEVIP63043C0D'
+    }
+};
 
 const AddFunds: React.FC = () => {
     const [amount, setAmount] = useState<string>('50');
@@ -76,18 +117,44 @@ const AddFunds: React.FC = () => {
         setShowPixModal(true);
     };
 
-    // Copiar Chave Pix Aleatória
-    const handleCopyPix = () => {
-        navigator.clipboard.writeText(CHAVE_PIX_REAL);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-    };
-
     // Detectar seleção do comprovante
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files.length > 0) {
             setComprovante(e.target.files[0]);
         }
+    };
+
+    // Retorna as informações de Pix (predefinido ou dinâmico)
+    const getPixInfo = () => {
+        const amtStr = amount.trim();
+        const predefined = PACOTES_INFO[amtStr];
+        if (predefined) {
+            return {
+                qrCodeImg: predefined.qrCodeImg,
+                copiaECola: predefined.copiaECola,
+                isPredefined: true
+            };
+        }
+        
+        // Geração dinâmica para valores personalizados
+        const numericAmount = parseFloat(amount.replace(',', '.'));
+        const valorPixStr = isNaN(numericAmount) ? "1.00" : numericAmount.toFixed(2);
+        
+        const brCode = `00020101021226870014br.gov.bcb.pix25650017${CHAVE_PIX_REAL}5204000053039865405${valorPixStr}5802BR5924BRUNO ADRIANO COSTA REIS6008BRASILIA62070503***6304`;
+        
+        return {
+            qrCodeImg: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(brCode)}`,
+            copiaECola: brCode,
+            isPredefined: false
+        };
+    };
+
+    const pixInfo = getPixInfo();
+
+    const handleCopyPix = () => {
+        navigator.clipboard.writeText(pixInfo.copiaECola);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
     };
 
     // Ação de Confirmação do Pix Manual (Upload + Gravação)
@@ -253,13 +320,13 @@ const AddFunds: React.FC = () => {
 
                                     <div className="w-full space-y-4 mb-6 flex flex-col items-center">
                                         <div className="bg-white p-3 rounded-xl border border-gray-200">
-                                            {/* Gerador de QR Code do Bruno nativo via Google Charts API */}
+                                            {/* Imagem do QR Code Pix (Estático ou via Charts se for valor customizado) */}
                                             <img
-                                                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=00020101021226870014br.gov.bcb.pix25650017${CHAVE_PIX_REAL}5204000053039865405${parseFloat(amount).toFixed(2)}5802BR5924BRUNO ADRIANO COSTA REIS6008BRASILIA62070503***6304`}
+                                                src={pixInfo.qrCodeImg}
                                                 alt="QR Code PIX"
                                                 className="w-40 h-40 object-contain rounded-lg"
                                                 onError={(e) => {
-                                                    e.currentTarget.src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${CHAVE_PIX_REAL}`;
+                                                    e.currentTarget.src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(pixInfo.copiaECola)}`;
                                                 }}
                                             />
                                         </div>
@@ -277,7 +344,7 @@ const AddFunds: React.FC = () => {
                                                 <input
                                                     type="text"
                                                     readOnly
-                                                    value={CHAVE_PIX_REAL}
+                                                    value={pixInfo.copiaECola}
                                                     className="flex-1 bg-background-dark border border-border-dark rounded-lg px-3 py-2 text-[10px] text-gray-300 outline-none truncate font-mono"
                                                 />
                                                 <button

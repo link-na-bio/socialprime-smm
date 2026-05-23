@@ -20,6 +20,9 @@ import AdminSupport from './pages/admin/AdminSupport';
 import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
 import SupportWidget from './components/SupportWidget';
+import CheckoutSuccess from './pages/CheckoutSuccess';
+import AdminOrders from './pages/admin/AdminOrders';
+
 
 // Loading Component
 const LoadingScreen = () => (
@@ -120,6 +123,12 @@ const LayoutHandler: React.FC = () => {
         </ProtectedRoute>
       } />
 
+      <Route path="/checkout/success" element={
+        <ProtectedRoute>
+          <CheckoutSuccess />
+        </ProtectedRoute>
+      } />
+
       <Route path="*" element={
         <ProtectedRoute>
           <MainLayout>
@@ -136,6 +145,7 @@ const LayoutHandler: React.FC = () => {
                     <Route path="/" element={<Admin />} />
                     <Route path="/config" element={<ApiConfig />} />
                     <Route path="/support" element={<AdminSupport />} />
+                    <Route path="/orders" element={<AdminOrders />} />
                   </Routes>
                 </AdminRoute>
               } />
