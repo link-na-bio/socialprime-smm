@@ -320,8 +320,28 @@ const Admin: React.FC = () => {
                 }
             });
 
-            if (syncError) throw syncError;
-            if (!syncRes || syncRes.error) throw new Error(syncRes?.error || "Erro desconhecido na sincronização.");
+            if (syncError) {
+                let errorMessage = syncError.message;
+                try {
+                    if ('context' in syncError && (syncError as any).context) {
+                        const context = (syncError as any).context;
+                        if (typeof context.json === 'function') {
+                            const body = await context.json();
+                            if (body && body.error) errorMessage = body.error;
+                        } else if (typeof context.text === 'function') {
+                            const text = await context.text();
+                            if (text) errorMessage = text;
+                        }
+                    }
+                } catch (e) {
+                    console.error("Erro ao extrair corpo do erro da Edge Function:", e);
+                }
+                throw new Error(errorMessage);
+            }
+
+            if (!syncRes || syncRes.error) {
+                throw new Error(syncRes?.error || "Erro desconhecido na sincronização.");
+            }
 
             alert(`Sincronização concluída com sucesso! ${syncRes.count} serviços foram atualizados com os novos valores, limites mínimos e descrições do fornecedor!`);
             loadDashboard();
