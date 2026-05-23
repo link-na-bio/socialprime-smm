@@ -106,17 +106,55 @@ const NewOrder: React.FC = () => {
   const getFinalPricePer1k = (service: Service | undefined) => {
     if (!service) return 0;
  
-    // Define qual margem usar (Personalizada, Categoria ou Global)
-    let marginToUse = globalMargin;
+    // Define qual margem usar (Personalizada, ou Calculada Dinamicamente por Palavra-Chave)
+    let marginToUse = 100; // fallback padrão de 100%
     if (service.custom_margin !== null && service.custom_margin !== undefined) {
       marginToUse = service.custom_margin;
-    } else if (service.category && categoryMargins.length > 0) {
-      // Correspondência textual flexível (case-insensitive substring)
-      const matchingMargin = categoryMargins.find((item) =>
-        item && item.category && service.category.toLowerCase().includes(item.category.toLowerCase().trim())
-      );
-      if (matchingMargin) {
-        marginToUse = matchingMargin.margin;
+    } else {
+      const nameLower = (service.name || '').toLowerCase();
+      const cost = service.rate;
+
+      // Regra 5: Custo superior a R$ 100,00 -> Margem fixa de proteção de 60%
+      if (cost > 100.00) {
+        marginToUse = 60;
+      }
+      // Regra 1: Visualizações, Views ou Impressões -> 500%
+      else if (
+        nameLower.includes('visualizações') || 
+        nameLower.includes('visualizacoes') || 
+        nameLower.includes('views') || 
+        nameLower.includes('impressões') || 
+        nameLower.includes('impressoes')
+      ) {
+        marginToUse = 500;
+      }
+      // Regra 2: Curtidas, Likes, Compartilhamentos, Shares ou Reactions -> 300%
+      else if (
+        nameLower.includes('curtidas') || 
+        nameLower.includes('likes') || 
+        nameLower.includes('compartilhamentos') || 
+        nameLower.includes('shares') || 
+        nameLower.includes('reactions')
+      ) {
+        marginToUse = 300;
+      }
+      // Regra 3: Membros, Telegram ou Global (e NÃO for YouTube) -> 150%
+      else if (
+        !(nameLower.includes('youtube') || nameLower.includes('yt')) && 
+        (nameLower.includes('membros') || nameLower.includes('telegram') || nameLower.includes('global'))
+      ) {
+        marginToUse = 150;
+      }
+      // Regra 4: Seguidores Brasileiros, Seguidores Brasil ou BR -> 140%
+      else if (
+        nameLower.includes('seguidores brasileiros') || 
+        nameLower.includes('seguidores brasil') || 
+        nameLower.includes('brasil') || 
+        nameLower.includes('brasileiro') || 
+        nameLower.includes('🇧🇷') || 
+        /\bbr\b/.test(nameLower)
+      ) {
+        marginToUse = 140;
       }
     }
  
