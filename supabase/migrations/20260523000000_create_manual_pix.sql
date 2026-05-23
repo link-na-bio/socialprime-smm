@@ -34,22 +34,33 @@ CREATE TABLE IF NOT EXISTS public.mensagens (
 ALTER TABLE public.mensagens ENABLE ROW LEVEL SECURITY;
 
 -- 3. Habilitar Realtime para escuta ao vivo
-BEGIN;
-  DO $$ 
+DO $$ 
+BEGIN
+  -- Cria a publicação se ela não existir
+  IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    CREATE PUBLICATION supabase_realtime;
+  END IF;
+
+  -- Adiciona tabelas à publicação se não estiverem adicionadas
   BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
-      CREATE PUBLICATION supabase_realtime;
-    END IF;
-  END $$;
-  
-  -- Tenta adicionar as tabelas à publicação (ignora erro se já estiverem adicionadas)
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.notificacoes_admin;
   EXCEPTION WHEN duplicate_object THEN
     NULL;
-  
-  ALTER PUBLICATION supabase_realtime ADD TABLE public.notificacoes_admin;
-  ALTER PUBLICATION supabase_realtime ADD TABLE public.mensagens;
-  ALTER PUBLICATION supabase_realtime ADD TABLE public.transactions;
-COMMIT;
+  END;
+
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.mensagens;
+  EXCEPTION WHEN duplicate_object THEN
+    NULL;
+  END;
+
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.transactions;
+  EXCEPTION WHEN duplicate_object THEN
+    NULL;
+  END;
+END $$;
+
 
 -- 4. Políticas de RLS (Segurança)
 
