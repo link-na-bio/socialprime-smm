@@ -57,6 +57,8 @@ const Admin: React.FC = () => {
         email: string;
     }>({ isOpen: false, url: '', txId: '', userId: '', amount: 0, full_name: '', email: '' });
 
+    const [syncing, setSyncing] = useState(false);
+
     useEffect(() => {
         loadDashboard();
 
@@ -293,6 +295,45 @@ const Admin: React.FC = () => {
         }
     };
 
+    const handleSyncServices = async () => {
+        const confirm = window.confirm("Deseja realmente sincronizar e atualizar todos os serviços, preços e limites mínimos/máximos com a Agência Popular?");
+        if (!confirm) return;
+
+        setSyncing(true);
+        try {
+            // 1. Busca configurações de admin_config
+            const { data: config, error: configError } = await supabase
+                .from('admin_config')
+                .select('api_url, api_key, margin_percent')
+                .single();
+
+            if (configError || !config || !config.api_key) {
+                throw new Error("Configurações do fornecedor (API Key) não encontradas em admin_config.");
+            }
+
+            // 2. Invoca a Edge Function de Sincronização passando as credenciais no body
+            const { data: syncRes, error: syncError } = await supabase.functions.invoke('sync-services', {
+                body: {
+                    api_url: config.api_url,
+                    api_key: config.api_key,
+                    margin: config.margin_percent
+                }
+            });
+
+            if (syncError) throw syncError;
+            if (!syncRes || syncRes.error) throw new Error(syncRes?.error || "Erro desconhecido na sincronização.");
+
+            alert(`Sincronização concluída com sucesso! ${syncRes.count} serviços foram atualizados com os novos valores, limites mínimos e descrições do fornecedor!`);
+            loadDashboard();
+
+        } catch (err: any) {
+            console.error("Falha ao sincronizar:", err);
+            alert("Erro na sincronização: " + err.message);
+        } finally {
+            setSyncing(false);
+        }
+    };
+
     const filteredUsers = users.filter(user => {
         const term = searchTerm.toLowerCase();
         return (
@@ -328,17 +369,27 @@ const Admin: React.FC = () => {
                         Visão geral financeira e gerenciamento de usuários.
                     </p>
                 </div>
-                <button
-                    onClick={() => {
-                        const pwd = prompt('Digite a senha de administrador:');
-                        if (pwd === '123456') navigate('/admin/config');
-                        else alert('Senha incorreta');
-                    }}
-                    className="bg-[#1e293b] hover:bg-[#334155] border border-slate-700 text-white px-4 py-2.5 rounded-lg font-bold transition-all flex items-center gap-2 text-sm shadow-sm"
-                >
-                    <span className="material-symbols-outlined text-[20px]">settings</span>
-                    Configurações
-                </button>
+                <div className="flex gap-3">
+                    <button
+                        onClick={handleSyncServices}
+                        disabled={syncing}
+                        className="bg-[#10b981] hover:bg-[#059669] disabled:opacity-50 text-black px-4 py-2.5 rounded-lg font-black transition-all flex items-center gap-2 text-sm shadow-lg shadow-emerald-500/10 cursor-pointer"
+                    >
+                        <span className={`material-symbols-outlined text-[20px] ${syncing ? 'animate-spin' : ''}`}>sync</span>
+                        {syncing ? 'Sincronizando...' : 'Sincronizar Serviços'}
+                    </button>
+                    <button
+                        onClick={() => {
+                            const pwd = prompt('Digite a senha de administrador:');
+                            if (pwd === '123456') navigate('/admin/config');
+                            else alert('Senha incorreta');
+                        }}
+                        className="bg-[#1e293b] hover:bg-[#334155] border border-slate-700 text-white px-4 py-2.5 rounded-lg font-bold transition-all flex items-center gap-2 text-sm shadow-sm"
+                    >
+                        <span className="material-symbols-outlined text-[20px]">settings</span>
+                        Configurações
+                    </button>
+                </div>
             </div>
 
             {/* --- BLOCO FINANCEIRO (Cards) --- */}
