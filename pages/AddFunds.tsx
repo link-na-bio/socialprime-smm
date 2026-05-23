@@ -80,8 +80,7 @@ const AddFunds: React.FC = () => {
             const cleanCpf = cpf.replace(/\D/g, '');
             const cleanPhone = phone.replace(/\D/g, '');
 
-            // Save to profile ONLY if not already saved (or maybe update? The requirement says read-only if exists, implying we don't update if exists. But if userProfile is null, we save.)
-            // Actually, usually you want to save if it's a new fill.
+            // Save to profile ONLY if not already saved
             if (!userProfile?.cpf) {
                 await supabase
                     .from('profiles')
@@ -89,11 +88,11 @@ const AddFunds: React.FC = () => {
                     .eq('id', user.id);
             }
 
-            const { data, error } = await supabase.functions.invoke('create-mercadopago-checkout', {
+            const { data, error } = await supabase.functions.invoke('create-abacatepay-checkout', {
                 body: {
-                    userId: user.id, // Pass userId for metadata
+                    userId: user.id,
                     amount: numericAmount,
-                    // ReturnURL is no longer used for redirect, but we can leave it or remove it.
+                    origin: window.location.origin,
                     customer: {
                         name: user.user_metadata.name || user.email,
                         email: user.email,
@@ -112,13 +111,11 @@ const AddFunds: React.FC = () => {
                 return;
             }
 
-            // New Mercado Pago Response Handling
-            if (data?.success && data?.pixCode && data?.qrCodeBase64) {
-                setPixCode(data.pixCode);
-                setQrCodeBase64(data.qrCodeBase64);
-                setShowPixModal(true);
+            // Redireciona o cliente para o checkout seguro da AbacatePay
+            if (data?.success && data?.url) {
+                window.location.href = data.url;
             } else {
-                console.error('Erro ao criar cobrança (sem dados Pix):', data);
+                console.error('Erro ao criar cobrança (sem URL de checkout):', data);
                 alert('Erro ao gerar Pix. Tente novamente.');
             }
         } catch (error) {
@@ -321,7 +318,7 @@ const AddFunds: React.FC = () => {
                                                 <span className="material-symbols-outlined">qr_code_2</span>
                                             </div>
                                             <div className="flex-1">
-                                                <h4 className="font-bold text-white">Pix Automático</h4>
+                                                <h4 className="font-bold text-white">Pix Automático via AbacatePay</h4>
                                                 <p className="text-xs text-text-secondary">Aprovação imediata (24/7)</p>
                                             </div>
                                             <div className="size-5 rounded-full border-2 border-primary flex items-center justify-center">

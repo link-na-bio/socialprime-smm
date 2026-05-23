@@ -1,3 +1,7 @@
+// CHECKOUT ABACATEPAY v2.0
+// Cria uma cobrança dinâmica via Pix na plataforma AbacatePay.
+// O saldo será creditado automaticamente através do webhook de pagamento.
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const corsHeaders = {
@@ -5,120 +9,136 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-serve(async (req) => {
-  // 1. Debug: Check if API Key exists
-  const accessToken = Deno.env.get('MERCADO_PAGO_ACCESS_TOKEN')
-  console.log('Access Token exists?', !!accessToken)
+console.log("AbacatePay Checkout Service - Iniciado");
 
-  // Handle CORS preflight
+serve(async (req) => {
+  // 1. CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    const rawBody = await req.json()
-    console.log('Body recebido:', JSON.stringify(rawBody))
+    // 2. Leitura e validação dos dados recebidos
+    const body = await req.json().catch(() => ({}));
+    const { amount, customer, userId, origin } = body;
 
-    const { amount, customer, userId } = rawBody
+    console.log(`[AbacatePay] Iniciando checkout. UserID: ${userId}, Valor: ${amount}`);
 
-    // STRICT CHECK: UserId is mandatory for balance update
-    if (!userId) {
-      throw new Error("UserId is mandatory for this operation");
+    if (!userId || userId.length < 10) {
+      console.error("ERRO: UserID inválido ou ausente!");
+      return new Response(JSON.stringify({ error: "O campo userId é obrigatório e deve ser válido." }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
     }
 
-    console.log(`[DEBUG] UserId received: ${userId}`)
-
-    // Mercado Pago expects "firstname" and "lastname" separately, but we can just put full name in first_name sometimes or split it.
-    // Ideally split.
-    let firstName = "Cliente";
-    let lastName = "SocialPrime";
-    if (customer?.name) {
-      const parts = customer.name.split(' ');
-      firstName = parts[0];
-      lastName = parts.slice(1).join(' ') || "SocialPrime";
+    if (!amount || Number(amount) <= 0) {
+      console.error("ERRO: Valor de recarga inválido!");
+      return new Response(JSON.stringify({ error: "O valor da recarga deve ser maior que zero." }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
     }
 
-    // Amount needs to be number
-    const transactionAmount = Number(amount);
+    // 3. Preparação das chaves de retorno (HashRouter compatível)
+    const baseOrigin = origin || "https://socialprime-smm.vercel.app";
+    const returnUrl = `${baseOrigin}/#/dashboard`;
+    const completionUrl = `${baseOrigin}/#/dashboard`;
 
+    // 4. Conversão para centavos (AbacatePay exige inteiro em centavos. Ex: R$ 50.00 -> 5000)
+    const amountInCents = Math.round(Number(amount) * 100);
+
+    // 5. Preparação dos dados do cliente
+    const customerName = customer?.name?.trim() || "Cliente SocialPrime";
+    const customerEmail = customer?.email?.trim() || "email@socialprime.com";
+    const customerTaxId = customer?.taxId ? customer.taxId.replace(/\D/g, '') : "19100000000";
+    const customerCellphone = customer?.cellphone ? customer.cellphone.replace(/\D/g, '') : "";
+
+    // 6. Payload para a API v2 da AbacatePay
     const payload = {
-      transaction_amount: transactionAmount,
-      description: "Recarga de Saldo - SocialPrime",
-      payment_method_id: "pix",
-      payer: {
-        email: customer?.email || "email@unknown.com",
-        first_name: firstName,
-        last_name: lastName,
-        identification: {
-          type: "CPF",
-          number: customer?.taxId?.replace(/\D/g, '') || ""
+      frequency: "ONE_TIME",
+      methods: ["PIX"],
+      products: [
+        {
+          externalId: "recharge",
+          name: "Recarga de Saldo - SocialPrime",
+          quantity: 1,
+          price: amountInCents
         }
+      ],
+      returnUrl: returnUrl,
+      completionUrl: completionUrl,
+      customer: {
+        name: customerName,
+        email: customerEmail,
+        taxId: customerTaxId,
+        cellphone: customerCellphone
       },
-      external_reference: userId, // CRITICAL: This links the payment to the Supabase User
-      notification_url: "https://rlnxcalcgmnsczvlcmcg.supabase.co/functions/v1/abacatepay-webhook" // Using the existing webhook function URL (renamed later?)
+      metadata: {
+        userId: String(userId)
+      }
+    };
+
+    console.log("[AbacatePay] Enviando payload:", JSON.stringify(payload));
+
+    // 7. Obter a chave de API da AbacatePay
+    const apiKey = Deno.env.get('ABACATEPAY_ACCESS_TOKEN') || Deno.env.get('ABACATEPAY_KEY') || Deno.env.get('VITE_ABACATEPAY_KEY');
+    if (!apiKey) {
+      throw new Error("Chave de API AbacatePay ausente nas configurações do Supabase.");
     }
 
-    console.log('Payload para Mercado Pago:', JSON.stringify(payload))
-
-    const response = await fetch('https://api.mercadopago.com/v1/payments', {
+    // 8. Chamar API do AbacatePay
+    const response = await fetch('https://api.abacatepay.com/v2/checkouts/create', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        'X-Idempotency-Key': crypto.randomUUID()
+        'Authorization': `Bearer ${apiKey.trim()}`,
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload)
-    })
+    });
 
-    const responseText = await response.text()
-    console.log(`Mercado Pago Status: ${response.status}`)
+    const responseText = await response.text();
+    console.log(`[AbacatePay] Resposta da API (${response.status}):`, responseText);
 
-    let responseData
+    let responseData;
     try {
-      responseData = JSON.parse(responseText)
+      responseData = JSON.parse(responseText);
     } catch {
-      responseData = { text: responseText }
+      responseData = { error: responseText };
     }
 
-    if (response.status !== 201 && response.status !== 200) {
-      console.error('Mercado Pago Error:', responseData)
-      throw new Error(`Mercado Pago API Error: ${responseData.message || JSON.stringify(responseData)}`)
+    if (!response.ok) {
+      console.error("[AbacatePay] Falha na resposta da API:", responseData);
+      return new Response(JSON.stringify({ error: "Erro ao criar cobrança no AbacatePay.", details: responseData }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
     }
 
-    // Extract Pix Code and QR Code Base64
-    const pointOfInteraction = responseData.point_of_interaction;
-    const transactionData = pointOfInteraction?.transaction_data;
-    const qrCode = transactionData?.qr_code;
-    const qrCodeBase64 = transactionData?.qr_code_base64;
-    const ticketUrl = transactionData?.ticket_url; // Link to payment page if needed
+    // 9. Sucesso! Retorna a URL de redirecionamento para o Frontend
+    const checkoutUrl = responseData.data?.url;
+    if (!checkoutUrl) {
+      console.error("[AbacatePay] URL de checkout não encontrada na resposta!");
+      throw new Error("A API não retornou uma URL de checkout válida.");
+    }
 
-    // Return to Frontend
     return new Response(
       JSON.stringify({
         success: true,
-        pixCode: qrCode,
-        qrCodeBase64: qrCodeBase64,
-        paymentId: responseData.id,
-        status: responseData.status,
-        ticketUrl: ticketUrl
+        url: checkoutUrl,
+        id: responseData.data?.id
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200,
+        status: 200
       }
-    )
+    );
 
   } catch (error) {
-    console.error('Edge Function Internal Error:', error)
+    console.error("[AbacatePay] Erro crítico no checkout:", error);
     return new Response(
-      JSON.stringify({
-        error: error instanceof Error ? error.message : String(error),
-        type: 'InternalFunctionError'
-      }),
+      JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 400,
+        status: 500
       }
-    )
+    );
   }
-})
+});

@@ -1,130 +1,190 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+// WEBHOOK DE CONFIRMAÇÃO DO ABACATEPAY
+// Valida pagamentos Pix do AbacatePay e adiciona saldo instantaneamente ao cliente.
+
+import { createClient } from "supabase-js"
 
 const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-serve(async (req) => {
-    // Handle CORS
-    if (req.method === 'OPTIONS') {
-        return new Response('ok', { headers: corsHeaders })
+// -----------------------------------------------------------------------------
+// Função Criptográfica Auxiliar: Validação HMAC SHA256 Nativa (Web Crypto API)
+// -----------------------------------------------------------------------------
+async function verifyHmacSignature(secret: string, rawBody: string, signatureFromHeader: string): Promise<boolean> {
+  try {
+    const encoder = new TextEncoder();
+    const keyData = encoder.encode(secret);
+    const messageData = encoder.encode(rawBody);
+
+    const cryptoKey = await crypto.subtle.importKey(
+      "raw",
+      keyData,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+
+    const signatureArrayBuffer = await crypto.subtle.sign(
+      "HMAC",
+      cryptoKey,
+      messageData
+    );
+
+    const calculatedSignature = Array.from(new Uint8Array(signatureArrayBuffer))
+      .map(b => b.toString(16).padStart(2, "0"))
+      .join("");
+
+    return calculatedSignature === signatureFromHeader.toLowerCase();
+  } catch (err) {
+    console.error("[Webhook Cryptography] Erro ao verificar assinatura HMAC:", err);
+    return false;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Servidor Deno Principal
+// -----------------------------------------------------------------------------
+Deno.serve(async (req) => {
+  // CORS Preflight
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  try {
+    // 1. Capturar o corpo da requisição em texto bruto (necessário para o HMAC)
+    const rawBody = await req.text();
+    if (!rawBody) {
+      return new Response("Corpo vazio recebido.", { status: 400, headers: corsHeaders });
     }
 
+    // 2. Parse do JSON recebido
+    let payload;
     try {
-        const url_string = req.url;
-        const url = new URL(url_string);
-        // Mercado Pago sends topic/id in query params often, or in body.
-        // Usually body: { action: 'payment.updated', data: { id: '...' }, ... }
-
-        const body = await req.json().catch(() => ({}));
-        console.log('Webhook Mercado Pago recebido:', JSON.stringify(body));
-
-        const action = body?.action;
-        const type = body?.type;
-        const dataId = body?.data?.id;
-
-        // Check if it's a payment update
-        // MP sends different structures sometimes, but 'action: payment.updated' is standard for v1.
-        if (action === 'payment.updated' || type === 'payment') {
-            const paymentId = dataId || body?.data?.id;
-
-            if (!paymentId) {
-                console.log('ID do pagamento não encontrado no webhook.');
-                return new Response(JSON.stringify({ ignored: true }), { status: 200, headers: corsHeaders });
-            }
-
-            console.log(`Verificando pagamento ID: ${paymentId}`);
-
-            // Fetch current status from Mercado Pago API
-            // NEVER trust the webhook body status blindly, always fetch fresh data.
-            const accessToken = Deno.env.get('MERCADO_PAGO_ACCESS_TOKEN');
-            const mpResponse = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
-                headers: {
-                    'Authorization': `Bearer ${accessToken}`
-                }
-            });
-
-            if (!mpResponse.ok) {
-                const errorText = await mpResponse.text();
-                throw new Error(`Erro ao consultar Mercado Pago: ${errorText}`);
-            }
-
-            const paymentData = await mpResponse.json();
-            console.log(`Status do Pagamento ${paymentId}: ${paymentData.status}`);
-
-            if (paymentData.status === 'approved') {
-                const userId = paymentData.external_reference;
-                const amountReceived = paymentData.transaction_amount;
-                const netReceived = paymentData.transaction_details?.net_received_amount || amountReceived; // Use net if available, or gross
-
-                console.log(`Pagamento Aprovado! User: ${userId}, Valor: ${amountReceived}`);
-
-                if (!userId) {
-                    console.error('UserId (external_reference) não encontrado no pagamento.');
-                    // Can't do anything without User ID.
-                    return new Response(JSON.stringify({ error: 'UserId missing' }), { status: 400, headers: corsHeaders });
-                }
-
-                // Update Supabase
-                const supabaseAdmin = createClient(
-                    Deno.env.get('SUPABASE_URL') ?? '',
-                    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-                )
-
-                // 1. Get current balance
-                const { data: profile, error: fetchError } = await supabaseAdmin
-                    .from('profiles')
-                    .select('balance')
-                    .eq('id', userId)
-                    .single()
-
-                if (fetchError) {
-                    console.error('Erro ao buscar perfil:', fetchError)
-                    throw fetchError
-                }
-
-                const currentBalance = Number(profile.balance || 0);
-                const amountToAdd = Number(amountReceived); // database usually stores float or numeric. 
-                // AbacatePay was sending cents, but MP sends float (e.g. 50.00). 
-                // Ensure we handle the math correctly. If your DB expects specific format, adjust here.
-                // Assuming DB balance is also float/numeric standard.
-
-                const newBalance = currentBalance + amountToAdd;
-
-                // 2. Update balance
-                const { error: updateError } = await supabaseAdmin
-                    .from('profiles')
-                    .update({ balance: newBalance })
-                    .eq('id', userId)
-
-                if (updateError) {
-                    console.error('Erro ao atualizar saldo:', updateError)
-                    throw updateError
-                }
-
-                console.log(`Saldo atualizado: ${currentBalance} -> ${newBalance}`);
-
-                return new Response(JSON.stringify({ success: true, newBalance }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 200
-                })
-            } else {
-                console.log(`Pagamento não está aprovado (Status: ${paymentData.status}). Ignorando.`);
-            }
-        }
-
-        return new Response(JSON.stringify({ received: true }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: 200
-        })
-
-    } catch (error) {
-        console.error('Webhook Error:', error)
-        return new Response(JSON.stringify({ error: error.message }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: 400
-        })
+      payload = JSON.parse(rawBody);
+    } catch {
+      return new Response("JSON inválido.", { status: 400, headers: corsHeaders });
     }
-})
+
+    console.log("[AbacatePay Webhook] Payload recebido:", JSON.stringify(payload));
+
+    const event = payload?.event;
+    const data = payload?.data;
+    
+    // 3. Validação de Assinatura (Segurança Criptográfica)
+    const webhookSecret = Deno.env.get('ABACATEPAY_WEBHOOK_SECRET');
+    const signatureFromHeader = req.headers.get('x-webhook-signature');
+
+    if (webhookSecret) {
+      if (!signatureFromHeader) {
+        console.error("[AbacatePay Webhook] A assinatura 'x-webhook-signature' está ausente no cabeçalho!");
+        return new Response("Assinatura ausente.", { status: 401, headers: corsHeaders });
+      }
+
+      const isSignatureValid = await verifyHmacSignature(webhookSecret.trim(), rawBody, signatureFromHeader);
+      if (!isSignatureValid) {
+        console.error("[AbacatePay Webhook] FRAUDE DETECTADA: Assinatura inválida!");
+        return new Response("Assinatura inválida.", { status: 401, headers: corsHeaders });
+      }
+      console.log("[AbacatePay Webhook] Assinatura HMAC validada com sucesso!");
+    } else {
+      console.warn("[AbacatePay Webhook] AVISO: A variável 'ABACATEPAY_WEBHOOK_SECRET' não está definida. Rodando em modo de segurança simplificada.");
+    }
+
+    // 4. Filtrar pelo evento correto: checkout.completed
+    if (event === 'checkout.completed') {
+      const checkoutId = data?.id;
+      const status = data?.status; // e.g. "PAID"
+      const amountInCents = data?.amount; // valor total em centavos
+      const userId = data?.metadata?.userId;
+
+      console.log(`[AbacatePay Webhook] Processando Checkout Pago. ID: ${checkoutId}, UserID: ${userId}, Centavos: ${amountInCents}, Status: ${status}`);
+
+      if (!userId) {
+        console.error("[AbacatePay Webhook] ERRO: UserId ausente nos metadados da cobrança. Impossível creditar.");
+        return new Response("OK", { status: 200, headers: corsHeaders }); // Retorna 200 para evitar loops de reenvio da AbacatePay
+      }
+
+      const amountBrl = Number(amountInCents) / 100;
+      if (isNaN(amountBrl) || amountBrl <= 0) {
+        console.error("[AbacatePay Webhook] ERRO: Valor inválido recebido:", amountInCents);
+        return new Response("OK", { status: 200, headers: corsHeaders });
+      }
+
+      // 5. Conectar com o Supabase (Ignorar RLS usando o Service Role Key nativo)
+      const sbUrl = Deno.env.get('SUPABASE_URL')!;
+      const sbKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+      const supabaseAdmin = createClient(sbUrl, sbKey, {
+        auth: { autoRefreshToken: false, persistSession: false }
+      });
+
+      // 6. IDEMPOTENCIA: Verificar se essa transação/checkout já foi creditada
+      const { data: existingTx } = await supabaseAdmin
+        .from('transactions')
+        .select('id')
+        .eq('payment_id', checkoutId)
+        .maybeSingle();
+
+      if (existingTx) {
+        console.log(`[AbacatePay Webhook] Cobrança ${checkoutId} já foi processada anteriormente. Pulando crédito.`);
+        return new Response(JSON.stringify({ success: true, duplicated: true }), {
+          status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // 7. Ler o saldo atual do cliente
+      const { data: profile, error: fetchError } = await supabaseAdmin
+        .from('profiles')
+        .select('balance')
+        .eq('id', userId)
+        .single();
+
+      if (fetchError || !profile) {
+        console.error(`[AbacatePay Webhook] ERRO ao buscar o perfil do usuário ${userId}:`, fetchError);
+        return new Response("OK", { status: 200, headers: corsHeaders });
+      }
+
+      // 8. Calcular e atualizar o novo saldo
+      const currentBalance = Number(profile.balance || 0);
+      const newBalance = currentBalance + amountBrl;
+
+      const { error: updateError } = await supabaseAdmin
+        .from('profiles')
+        .update({ balance: newBalance })
+        .eq('id', userId);
+
+      if (updateError) {
+        console.error(`[AbacatePay Webhook] ERRO ao atualizar saldo do usuário ${userId}:`, updateError);
+        return new Response("Erro interno ao atualizar saldo.", { status: 500, headers: corsHeaders });
+      }
+
+      console.log(`[AbacatePay Webhook] SUCESSO: R$ ${amountBrl} creditado ao usuário ${userId}. Novo saldo: R$ ${newBalance}`);
+
+      // 9. Registrar na tabela de transações para evitar re-processamento no futuro
+      const { error: insertTxError } = await supabaseAdmin
+        .from('transactions')
+        .insert({
+          payment_id: checkoutId,
+          user_id: userId,
+          amount: amountBrl,
+          status: 'approved'
+        });
+
+      if (insertTxError) {
+        console.error("[AbacatePay Webhook] ALERTA: Erro ao salvar transação de segurança:", insertTxError);
+      }
+    }
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 200
+    });
+
+  } catch (error) {
+    console.error("[AbacatePay Webhook] Erro crítico:", error);
+    return new Response(JSON.stringify({ error: "Internal Server Error" }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 200 // Retorna 200 para evitar que o gateway fique reenviando em caso de falha de código local
+    });
+  }
+});
