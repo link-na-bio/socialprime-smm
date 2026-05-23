@@ -89,13 +89,17 @@ Deno.serve(async (req) => {
         // 6. Enviar para Agência Popular
 
         const params = new URLSearchParams()
-        params.append('key', config.api_key.trim())
+        params.append('key', (config.api_key || '').trim())
         params.append('action', 'add')
         params.append('service', serviceId)
         params.append('link', link)
         params.append('quantity', quantity.toString())
 
-        const response = await fetch(config.api_url.trim(), {
+        const apiUrl = (config.api_url || '').trim()
+        if (!apiUrl) throw new Error('A URL da API do fornecedor não está configurada.')
+        if (!(config.api_key || '').trim()) throw new Error('A chave de API (Token) do fornecedor não está configurada no painel.')
+
+        const response = await fetch(apiUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: params,

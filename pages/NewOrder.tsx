@@ -134,8 +134,29 @@ const NewOrder: React.FC = () => {
         const { data: apiResponse, error } = await supabase.functions.invoke('place-order', {
           body: { service: selectedService.service_id, link, quantity }
         });
-        if (error) throw error;
-        if (!apiResponse || apiResponse.error) throw new Error('Erro na API do fornecedor.');
+        
+        if (error) {
+          let errorMessage = error.message;
+          try {
+            if ('context' in error && (error as any).context) {
+              const context = (error as any).context;
+              if (typeof context.json === 'function') {
+                const body = await context.json();
+                if (body && body.error) errorMessage = body.error;
+              } else if (typeof context.text === 'function') {
+                const text = await context.text();
+                if (text) errorMessage = text;
+              }
+            }
+          } catch (e) {
+            console.error("Erro ao extrair corpo de erro da Edge Function:", e);
+          }
+          throw new Error(errorMessage);
+        }
+
+        if (!apiResponse || apiResponse.error) {
+          throw new Error(apiResponse?.error || 'Erro na API do fornecedor.');
+        }
         externalOrderId = apiResponse.order;
       }
 
