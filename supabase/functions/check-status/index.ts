@@ -24,7 +24,7 @@ Deno.serve(async (req) => {
     // 2. Buscar pedidos que ainda não estão finalizados (pending, processing, in_progress)
     const { data: orders, error: ordersError } = await supabaseClient
       .from('orders')
-      .select('id, user_id, external_id, status')
+      .select('id, user_id, external_id, status, charge')
       .in('status', ['pending', 'processing', 'in_progress'])
       .not('external_id', 'is', null)
 
@@ -77,6 +77,31 @@ Deno.serve(async (req) => {
               .eq('id', order.id)
 
             console.log(`[Cron] Pedido ${order.id} atualizado para: ${newStatus}`)
+
+            // REEMBOLSO AUTOMÁTICO SE CANCELADO OU REEMBOLSADO
+            if (newStatus === 'canceled' || newStatus === 'refunded') {
+              const { data: profile } = await supabaseClient
+                .from('profiles')
+                .select('balance, total_spent')
+                .eq('id', order.user_id)
+                .single()
+
+              if (profile) {
+                const refundAmount = Number(order.charge || 0)
+                const currentBalance = Number(profile.balance || 0)
+                const currentSpent = Number(profile.total_spent || 0)
+
+                await supabaseClient
+                  .from('profiles')
+                  .update({
+                    balance: currentBalance + refundAmount,
+                    total_spent: Math.max(0, currentSpent - refundAmount)
+                  })
+                  .eq('id', order.user_id)
+
+                console.log(`[Cron] Reembolso de R$ ${refundAmount} creditado ao usuário ${order.user_id} por cancelamento.`)
+              }
+            }
 
 
             let notificationMessage = `O status do pedido #${order.id.slice(0, 8)} mudou para ${newStatus}.`;

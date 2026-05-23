@@ -46,10 +46,10 @@ Deno.serve(async (req) => {
             if (parts.length > 1) lastName = parts.slice(1).join(' ');
         }
 
-        // 4. URL DO WEBHOOK (FIXA E SEGURA)
-        // Usamos a URL exata do seu projeto para garantir que o MP notifique o lugar certo.
-        // Substitua 'ejpyblnvjjqcfdazqquy' se o seu ID de projeto mudar, mas por enquanto é esse.
-        const webhookUrl = "https://ejpyblnvjjqcfdazqquy.supabase.co/functions/v1/mercadopago-webhook";
+        // 4. URL DO WEBHOOK (DINÂMICA E SEGURA)
+        // Usamos a URL do seu projeto para garantir que o MP notifique o lugar certo.
+        const supabaseUrl = Deno.env.get('SUPABASE_URL') || "https://ejpyblnvjjqcfdazqquy.supabase.co";
+        const webhookUrl = `${supabaseUrl}/functions/v1/mercadopago-webhook`;
 
         // 5. Payload para o Mercado Pago
         const payload = {

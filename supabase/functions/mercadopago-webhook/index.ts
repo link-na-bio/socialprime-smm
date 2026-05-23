@@ -58,7 +58,7 @@ Deno.serve(async (req) => {
 
                 // Conexão Admin (Service Role) para ignorar RLS e escrever no saldo
                 const sbUrl = Deno.env.get('SUPABASE_URL');
-                const sbKey = Deno.env.get('SOCIAL_ADMIN_KEY');
+                const sbKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
                 const supabaseAdmin = createClient(sbUrl!, sbKey!, {
                     auth: { autoRefreshToken: false, persistSession: false }
