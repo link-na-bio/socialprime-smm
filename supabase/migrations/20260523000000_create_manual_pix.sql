@@ -160,3 +160,68 @@ TO authenticated
 USING (auth.jwt() ->> 'email' = 'brunomeueditor@gmail.com')
 WITH CHECK (auth.jwt() ->> 'email' = 'brunomeueditor@gmail.com');
 
+-- ==========================================================
+-- 7. Políticas de RLS para a Tabela profiles
+-- ==========================================================
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Admins can manage all profiles" ON public.profiles;
+CREATE POLICY "Admins can manage all profiles" 
+ON public.profiles 
+FOR ALL 
+TO authenticated 
+USING (
+  (auth.jwt() ->> 'email' = 'brunomeueditor@gmail.com')
+)
+WITH CHECK (
+  (auth.jwt() ->> 'email' = 'brunomeueditor@gmail.com')
+);
+
+DROP POLICY IF EXISTS "Users can view own profile" ON public.profiles;
+CREATE POLICY "Users can view own profile" 
+ON public.profiles 
+FOR SELECT 
+TO authenticated 
+USING (auth.uid() = id);
+
+DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
+CREATE POLICY "Users can update own profile" 
+ON public.profiles 
+FOR UPDATE 
+TO authenticated 
+USING (auth.uid() = id)
+WITH CHECK (auth.uid() = id);
+
+-- ==========================================================
+-- 8. Políticas de RLS para a Tabela notifications
+-- ==========================================================
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Admins can manage all notifications" ON public.notifications;
+CREATE POLICY "Admins can manage all notifications" 
+ON public.notifications 
+FOR ALL 
+TO authenticated 
+USING (
+  (auth.jwt() ->> 'email' = 'brunomeueditor@gmail.com')
+)
+WITH CHECK (
+  (auth.jwt() ->> 'email' = 'brunomeueditor@gmail.com')
+);
+
+DROP POLICY IF EXISTS "Users can view own notifications" ON public.notifications;
+CREATE POLICY "Users can view own notifications" 
+ON public.notifications 
+FOR SELECT 
+TO authenticated 
+USING (auth.uid() = user_id OR user_id IS NULL);
+
+DROP POLICY IF EXISTS "Users can update own notifications" ON public.notifications;
+CREATE POLICY "Users can update own notifications" 
+ON public.notifications 
+FOR UPDATE 
+TO authenticated 
+USING (auth.uid() = user_id)
+WITH CHECK (auth.uid() = user_id);
+
+
