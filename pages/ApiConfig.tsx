@@ -27,7 +27,7 @@ const ApiConfig: React.FC = () => {
     const loadSettings = async () => {
         try {
             // 1. Busca configurações de admin_settings
-            const { data: settings } = await supabase
+            const { data: settings, error: settingsError } = await supabase
                 .from('admin_settings')
                 .select('*')
                 .single();
@@ -42,10 +42,14 @@ const ApiConfig: React.FC = () => {
             }
 
             // 2. Busca configurações de admin_config (API & Margem de Lucro)
-            const { data: config } = await supabase
+            const { data: config, error: configError } = await supabase
                 .from('admin_config')
                 .select('*')
                 .single();
+
+            if (configError && configError.code !== 'PGRST116') {
+                console.error('Erro ao buscar admin_config:', configError.message);
+            }
 
             if (config) {
                 setMarginPercent(Number(config.margin_percent) || 200);
@@ -63,7 +67,7 @@ const ApiConfig: React.FC = () => {
                 }
             }
         } catch (error) {
-            console.log('Configurações carregadas com sucesso.');
+            console.error('Erro ao carregar configurações:', error);
         }
     };
 
@@ -71,10 +75,15 @@ const ApiConfig: React.FC = () => {
         setLoading(true);
         try {
             // 1. Atualiza ou Cria admin_settings
-            const { data: existingSettings } = await supabase.from('admin_settings').select('id').single();
+            const { data: existingSettings, error: selectSettingsError } = await supabase
+                .from('admin_settings')
+                .select('id')
+                .maybeSingle();
+
+            if (selectSettingsError) throw selectSettingsError;
 
             if (existingSettings) {
-                await supabase
+                const { error: updateError } = await supabase
                     .from('admin_settings')
                     .update({
                         is_simulated: isSimulated,
@@ -86,25 +95,36 @@ const ApiConfig: React.FC = () => {
                         updated_at: new Date(),
                     })
                     .eq('id', existingSettings.id);
+
+                if (updateError) throw updateError;
             } else {
-                await supabase.from('admin_settings').insert({
-                    is_simulated: isSimulated,
-                    users_offset: Number(usersOffset),
-                    orders_offset: Number(ordersOffset),
-                    revenue_offset: Number(revenueOffset),
-                    cost_offset: Number(costOffset),
-                    profit_offset: Number(profitOffset),
-                });
+                const { error: insertError } = await supabase
+                    .from('admin_settings')
+                    .insert({
+                        is_simulated: isSimulated,
+                        users_offset: Number(usersOffset),
+                        orders_offset: Number(ordersOffset),
+                        revenue_offset: Number(revenueOffset),
+                        cost_offset: Number(costOffset),
+                        profit_offset: Number(profitOffset),
+                    });
+
+                if (insertError) throw insertError;
             }
 
             // 2. Atualiza ou Cria admin_config (Provedor SMM)
-            const { data: existingConfig } = await supabase.from('admin_config').select('id').single();
+            const { data: existingConfig, error: selectConfigError } = await supabase
+                .from('admin_config')
+                .select('id')
+                .maybeSingle();
+
+            if (selectConfigError) throw selectConfigError;
 
             // Filtra itens vazios antes de salvar
             const cleanedRules = keywordRules.filter(item => item.keywords.trim() !== '');
 
             if (existingConfig) {
-                await supabase
+                const { error: updateConfigError } = await supabase
                     .from('admin_config')
                     .update({
                         api_url: apiUrl,
@@ -114,20 +134,26 @@ const ApiConfig: React.FC = () => {
                         updated_at: new Date(),
                     })
                     .eq('id', existingConfig.id);
+
+                if (updateConfigError) throw updateConfigError;
             } else {
-                await supabase.from('admin_config').insert({
-                    id: 1,
-                    api_url: apiUrl,
-                    api_key: apiKey,
-                    margin_percent: Number(marginPercent),
-                    keyword_rules: cleanedRules,
-                });
+                const { error: insertConfigError } = await supabase
+                    .from('admin_config')
+                    .insert({
+                        id: 1,
+                        api_url: apiUrl,
+                        api_key: apiKey,
+                        margin_percent: Number(marginPercent),
+                        keyword_rules: cleanedRules,
+                    });
+
+                if (insertConfigError) throw insertConfigError;
             }
 
             alert('Configurações salvas e aplicadas com sucesso!');
             navigate('/admin');
         } catch (error: any) {
-            alert('Erro ao salvar: ' + error.message);
+            alert('Erro ao salvar no banco de dados: ' + error.message);
         } finally {
             setLoading(false);
         }

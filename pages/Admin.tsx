@@ -307,8 +307,12 @@ const Admin: React.FC = () => {
                 .select('api_url, api_key, margin_percent, keyword_rules')
                 .single();
 
-            if (configError || !config || !config.api_key) {
-                throw new Error("Configurações do fornecedor (API Key) não encontradas em admin_config.");
+            if (configError) {
+                throw new Error(`Erro ao buscar configurações no banco de dados: ${configError.message} (${configError.code})`);
+            }
+
+            if (!config || !config.api_key) {
+                throw new Error("Configurações do fornecedor (API Key) vazias ou não encontradas em admin_config.");
             }
 
             // 2. Invoca a Edge Function de Sincronização passando as credenciais no body
