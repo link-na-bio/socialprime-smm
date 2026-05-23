@@ -116,6 +116,14 @@ const NewOrder: React.FC = () => {
   const handleCreateOrder = async () => {
     if (!selectedService || !link || !quantity) return alert('Preencha todos os campos!');
 
+    // Validação de Limites Mínimo e Máximo do Serviço
+    if (selectedService.min && quantity < selectedService.min) {
+      return alert(`Quantidade mínima permitida para este serviço é: ${selectedService.min}`);
+    }
+    if (selectedService.max && quantity > selectedService.max) {
+      return alert(`Quantidade máxima permitida para este serviço é: ${selectedService.max}`);
+    }
+
     setLoading(true);
 
     try {
