@@ -115,8 +115,18 @@ function parseDump() {
 
 function main() {
     console.log("Parsing dump file...");
-    const services = parseDump();
-    console.log(`Parsed ${services.length} services.`);
+    const rawServices = parseDump();
+    
+    const allowedKeywords = ['Instagram', 'TikTok', 'YouTube', 'Facebook', 'Twitter', 'Google'];
+    const allowedKeywordsLower = allowedKeywords.map(k => k.toLowerCase());
+
+    const services = rawServices.filter(s => {
+        if (!s.name) return false;
+        const nameLower = s.name.toLowerCase();
+        return allowedKeywordsLower.some(keyword => nameLower.includes(keyword));
+    });
+
+    console.log(`Parsed ${rawServices.length} services, filtered to ${services.length} whitelisted services.`);
 
     // Cabeçalho Markdown
     let md = `# Relatório Comparativo - Precificação Dinâmica por Palavra-Chave\n\n`;

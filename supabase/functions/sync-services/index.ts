@@ -37,6 +37,9 @@ serve(async (req) => {
         return new Response('ok', { headers: corsHeaders })
     }
 
+    const allowedKeywords = ['Instagram', 'TikTok', 'YouTube', 'Facebook', 'Twitter', 'Google'];
+    const allowedKeywordsLower = allowedKeywords.map(k => k.toLowerCase());
+
     try {
         // 1. Inicializa Supabase Admin (Para ler configurações protegidas)
         const supabase = createClient(
@@ -70,6 +73,10 @@ serve(async (req) => {
             throw new Error('Configuração incompleta (URL ou Key faltando).')
         }
 
+        // Limpa espaços em branco para evitar erros com chaves/URLs copiadas
+        api_url = api_url.trim();
+        api_key = api_key.trim();
+
         const globalMargin = Number(margin) || 200;
         let rules: KeywordRule[] = [];
         try {
@@ -100,8 +107,17 @@ serve(async (req) => {
             throw new Error('A API do fornecedor não retornou uma lista válida.');
         }
 
-        // 5. Processa e Prepara para salvar os dados originais no banco
-        const servicesToUpsert = providerServices.map((s: any) => {
+        // 5. Aplica filtro rigoroso (whitelist) case-insensitive
+        const filteredServices = providerServices.filter((s: any) => {
+            if (!s.name) return false;
+            const nameLower = s.name.toLowerCase();
+            return allowedKeywordsLower.some(keyword => nameLower.includes(keyword));
+        });
+
+        console.log(`Filtrados ${filteredServices.length} de ${providerServices.length} serviços para importação.`);
+
+        // 6. Processa e Prepara para salvar os dados originais no banco
+        const servicesToUpsert = filteredServices.map((s: any) => {
             const cost = parseFloat(s.rate);
             
             // Calculamos apenas para fins de log ou auditoria se necessário
@@ -120,15 +136,51 @@ serve(async (req) => {
             }
         });
 
-        // 6. Salva no Supabase
-        const { error } = await supabase
-            .from('services')
-            .upsert(servicesToUpsert, { onConflict: 'service_id' })
+        // 7. Salva no Supabase os serviços autorizados pela whitelist
+        if (servicesToUpsert.length > 0) {
+            const { error: upsertError } = await supabase
+                .from('services')
+                .upsert(servicesToUpsert, { onConflict: 'service_id' });
 
-        if (error) throw error;
+            if (upsertError) throw upsertError;
+        }
+
+        // 8. Remove/Desativa do banco todos os serviços atuais que não se enquadram na nova regra
+        const { data: dbServices, error: fetchError } = await supabase
+            .from('services')
+            .select('service_id, name');
+
+        if (fetchError) throw fetchError;
+
+        let deletedCount = 0;
+        if (dbServices && dbServices.length > 0) {
+            const servicesToDelete = dbServices.filter((s: any) => {
+                if (!s.name) return true; // Deleta sem nome
+                const nameLower = s.name.toLowerCase();
+                return !allowedKeywordsLower.some(keyword => nameLower.includes(keyword));
+            });
+
+            if (servicesToDelete.length > 0) {
+                const idsToDelete = servicesToDelete.map((s: any) => s.service_id);
+                console.log(`Deletando ${idsToDelete.length} serviços antigos que não correspondem à whitelist.`);
+                
+                const { error: deleteError } = await supabase
+                    .from('services')
+                    .delete()
+                    .in('service_id', idsToDelete);
+
+                if (deleteError) throw deleteError;
+                deletedCount = idsToDelete.length;
+            }
+        }
 
         return new Response(
-            JSON.stringify({ success: true, count: servicesToUpsert.length, source: 'database_config' }),
+            JSON.stringify({ 
+                success: true, 
+                importedCount: servicesToUpsert.length, 
+                deletedCount: deletedCount, 
+                source: 'database_config' 
+            }),
             { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
 
